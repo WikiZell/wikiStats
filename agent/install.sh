@@ -22,9 +22,12 @@ CONFIG_FILE="${CONFIG_DIR}/config.toml"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 SERVICE_USER="fleetpanel"
 SERVICE_GROUP="fleetpanel"
-MIN_PY_MINOR=11
+MIN_PY_MINOR=9
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Piped from curl there is no BASH_SOURCE at all, and `set -u` makes referencing it
+# fatal. The fallback keeps the message out of the very first thing a user sees;
+# the bootstrap check below then notices the tree is missing and fetches it.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo /nonexistent)"
 
 ASSUME_YES=0
 PORT=""
@@ -109,21 +112,39 @@ if [ -r /etc/os-release ]; then
         *debian*|*ubuntu*|*raspbian*) : ;;
         *) warn "untested distribution '${PRETTY_NAME:-unknown}'; continuing anyway" ;;
     esac
-    info "detected ${PRETTY_NAME:-unknown}"
+    info "detected ${PRETTY_NAME:-unknown} ($(uname -m))"
 fi
 
+# Newest first: on a box with both 3.9 and 3.13 there is no reason to use 3.9.
 PYTHON=""
-for candidate in python3.13 python3.12 python3.11 python3; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-        minor="$("$candidate" -c 'import sys; print(sys.version_info[1] if sys.version_info[0]==3 else 0)' 2>/dev/null || echo 0)"
-        if [ "$minor" -ge "$MIN_PY_MINOR" ]; then PYTHON="$(command -v "$candidate")"; break; fi
+PYTHON_MINOR=0
+for candidate in python3.13 python3.12 python3.11 python3.10 python3.9 python3; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    minor="$("$candidate" -c 'import sys; print(sys.version_info[1] if sys.version_info[0]==3 else 0)' 2>/dev/null || echo 0)"
+    if [ "$minor" -ge "$MIN_PY_MINOR" ]; then
+        PYTHON="$(command -v "$candidate")"
+        PYTHON_MINOR="$minor"
+        break
     fi
 done
-[ -n "$PYTHON" ] || die "Python 3.${MIN_PY_MINOR}+ not found. Install it with: apt install python3 python3-venv"
+if [ -z "$PYTHON" ]; then
+    die "Python 3.${MIN_PY_MINOR}+ not found. Install it with: apt install python3 python3-venv"
+fi
 info "using $PYTHON ($("$PYTHON" --version 2>&1))"
+
+# 3.9 and 3.10 have no stdlib tomllib; pyproject.toml declares tomli for them, so
+# nothing extra is needed here beyond saying which path was taken.
+if [ "$PYTHON_MINOR" -lt 11 ]; then
+    info "no stdlib tomllib on this interpreter; the tomli backport will be installed"
+fi
 
 if ! "$PYTHON" -c 'import venv' >/dev/null 2>&1; then
     die "the venv module is missing. Install it with: apt install python3-venv"
+fi
+# ensurepip is a separate package on Debian derivatives and its absence produces a
+# baffling failure several steps later.
+if ! "$PYTHON" -c 'import ensurepip' >/dev/null 2>&1; then
+    die "ensurepip is missing. Install it with: apt install python3-venv"
 fi
 
 # ------------------------------------------------------------ bootstrap

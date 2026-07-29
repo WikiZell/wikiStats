@@ -44,12 +44,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows is in the matrix on purpose: the collectors have to degrade
+        # 3.9 and 3.10 are here because they are Debian 11's and Ubuntu 22.04's
+        # system Python, and they are the versions with no stdlib tomllib - the
+        # tomli fallback is only exercised on them.
+        #
+        # Windows is in the matrix on purpose too: the collectors have to degrade
         # gracefully on a platform with no /proc, and the tests must not depend on
         # the host they run on.
         os: [ubuntu-latest, windows-latest]
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
         exclude:
+          - os: windows-latest
+            python: "3.10"
           - os: windows-latest
             python: "3.11"
           - os: windows-latest

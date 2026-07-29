@@ -81,7 +81,8 @@ _NULL_NETWORK: dict[str, Any] = {
 
 
 def utc_now_iso() -> str:
-    return dt.datetime.now(tz=dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # dt.timezone.utc rather than dt.UTC, which is 3.11+ only.
+    return dt.datetime.now(tz=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def derive_capabilities(sample: dict[str, Any]) -> list[str]:

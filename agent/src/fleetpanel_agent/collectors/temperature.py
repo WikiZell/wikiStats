@@ -232,7 +232,8 @@ def parse_sensors_json(text: str) -> list[dict[str, Any]]:
                 continue
             current = high = critical = None
             for key, value in values.items():
-                if not isinstance(value, int | float):
+                # A tuple, not `int | float`: PEP 604 in isinstance is 3.10+.
+                if not isinstance(value, (int, float)):
                     continue
                 if key.endswith("_input"):
                     current = float(value)

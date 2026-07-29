@@ -80,7 +80,11 @@ def read_hardware_model(
 
 
 def utc_iso(timestamp: float) -> str:
-    return dt.datetime.fromtimestamp(timestamp, tz=dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # dt.timezone.utc rather than dt.UTC: the latter is 3.11+, and this agent runs
+    # on Debian 11's 3.9.
+    return dt.datetime.fromtimestamp(timestamp, tz=dt.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
 
 
 class HostCollector:

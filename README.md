@@ -56,7 +56,7 @@ and that is all it can do.
 | --- | --- |
 | Panel | **ESP32-2432S028R** ("Cheap Yellow Display") — 320 × 240 ILI9341, XPT2046 resistive touch, ESP32-WROOM-32, 4 MB flash, **no PSRAM** |
 | Other CYD variants | supported by adding one file behind `src/hal/display_hal.h` |
-| Agents | Debian 12+, Ubuntu 22.04+, Raspberry Pi OS bookworm+, Python 3.11+ |
+| Agents | **Python 3.9+** — Debian 11+, Ubuntu 20.04+, Raspberry Pi OS bullseye+. The installer picks the newest interpreter it finds and adds the `tomli` backport on 3.9/3.10. |
 
 ## Architecture in one paragraph
 

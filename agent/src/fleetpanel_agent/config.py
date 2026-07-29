@@ -14,11 +14,19 @@ Design rules:
 from __future__ import annotations
 
 import ipaddress
-import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+# tomllib is stdlib from 3.11. Debian 11 and Ubuntu 20.04 ship 3.9, and those are
+# exactly the machines people want to keep an eye on, so fall back to the tomli
+# package there - it is the same parser tomllib was derived from and exposes the
+# same two names this module uses.
+try:  # pragma: no cover - whichever branch runs depends on the interpreter
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib  # type: ignore[no-redef]
 
 DEFAULT_CONFIG_PATH = Path("/etc/fleetpanel-agent/config.toml")
 

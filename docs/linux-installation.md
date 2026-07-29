@@ -5,10 +5,19 @@ installer is the same; only the details differ.
 
 ## Requirements
 
-* Python 3.11 or newer (`apt install python3 python3-venv` on bookworm and later)
+* **Python 3.9 or newer** — the system Python on Debian 11, Ubuntu 20.04 and
+  everything since. `apt install python3 python3-venv` if it is not already there.
 * systemd
-* Debian 12+, Ubuntu 22.04+, or Raspberry Pi OS bookworm+ (anything else works but
+* Debian 11+, Ubuntu 20.04+, or Raspberry Pi OS bullseye+ (anything else works but
   is untested and the installer says so)
+
+The installer surveys the machine and adapts: it picks the newest `python3.x` it can
+find, and on 3.9 or 3.10 — which have no stdlib `tomllib` — it pulls in the `tomli`
+backport automatically. Nothing to configure either way; it prints which interpreter
+it chose.
+
+Verified installs: Raspberry Pi 4 Model B on Debian 13 with Python 3.13, and Debian
+11 on x86-64 with Python 3.9.
 
 ## Example 1 — Raspberry Pi 4 running Raspberry Pi OS
 
