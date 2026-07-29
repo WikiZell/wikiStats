@@ -36,6 +36,11 @@ std::string formatPercent(double percent);
 // "3.0 GiB / 8.0 GiB"
 std::string formatUsedOfTotal(double used, double total, bool binary = true);
 
+// "27.7 of 62.5 GiB" - both values scaled to the total's unit, the unit written
+// once. Shorter than repeating it, and the two numbers line up because they share
+// a scale, which "980 MiB / 1.2 GiB" never does.
+std::string formatSharedUnit(double used, double total, bool binary = true);
+
 // Frequency: 1800.0 -> "1.80 GHz", 900.0 -> "900 MHz"
 std::string formatFrequency(double megahertz);
 

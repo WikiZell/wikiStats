@@ -128,6 +128,32 @@ std::string formatUsedOfTotal(double used, double total, bool binary) {
     return result;
 }
 
+std::string formatSharedUnit(double used, double total, bool binary) {
+    if (!std::isfinite(used) || !std::isfinite(total) || total <= 0 || used < 0) {
+        return kNoValue;
+    }
+    const double base = binary ? 1024.0 : 1000.0;
+    const char* const* suffixes = binary ? kBinarySuffix : kDecimalSuffix;
+
+    // The scale comes from the total, so the used value is expressed in the same
+    // unit even when it is two orders of magnitude smaller.
+    int index = 0;
+    double scaledTotal = total;
+    while (scaledTotal >= base && index < kSuffixCount - 1) {
+        scaledTotal /= base;
+        ++index;
+    }
+    double scaledUsed = used;
+    for (int i = 0; i < index; ++i) {
+        scaledUsed /= base;
+    }
+
+    char buffer[48];
+    std::snprintf(buffer, sizeof(buffer), "%.1f of %.1f %s", scaledUsed, scaledTotal,
+                  suffixes[index]);
+    return std::string(buffer);
+}
+
 std::string formatFrequency(double megahertz) {
     if (!std::isfinite(megahertz) || megahertz <= 0) {
         return kNoValue;

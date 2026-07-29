@@ -140,6 +140,22 @@ nc wikistats-XXXX.local 23
 Output only — anything typed at it is read and discarded, so it can never become a
 command channel. `GET /api/logs` returns the same buffer.
 
+## Screenshots
+
+```bash
+python tools/screenshot.py wikistats-XXXX.local dashboard.png
+```
+
+A full 320x240 RGB565 frame is 150 KiB and this board has around 100 KiB of heap
+free, so the frame is never buffered. A client connects to TCP 24, the UI task
+invalidates the screen, and each ~40-line band goes to the socket straight out of
+the LVGL flush callback. The cost is that the UI stalls for the length of the
+capture, which is fine for something that runs on demand and invaluable for
+reviewing layout on a panel you cannot reach.
+
+The listener follows the same configuration switch as the log console, on the next
+port up.
+
 ## Recovery
 
 Hold the touchscreen during boot. After three seconds (RGB LED turns amber) the

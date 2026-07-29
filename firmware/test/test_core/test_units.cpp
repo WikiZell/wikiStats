@@ -69,6 +69,20 @@ static void test_used_of_total(void) {
     assertText("--", formatUsedOfTotal(1.0, 0.0));
 }
 
+static void test_shared_unit(void) {
+    // The scale comes from the total, so both numbers are directly comparable.
+    assertText("27.7 of 62.5 GiB", formatSharedUnit(29726512742.0, 67108864000.0));
+    assertText("3.0 of 8.0 GiB", formatSharedUnit(3221225472.0, 8589934592.0));
+    // A small used value stays in the total's unit instead of switching to MiB.
+    assertText("0.5 of 62.5 GiB", formatSharedUnit(536870912.0, 67108864000.0));
+    assertText("0.0 of 4.0 TiB", formatSharedUnit(1048576.0, 4.0 * 1024 * 1024 * 1024 * 1024));
+}
+
+static void test_shared_unit_invalid(void) {
+    assertText("--", formatSharedUnit(1.0, 0.0));
+    assertText("--", formatSharedUnit(-1.0, 100.0));
+}
+
 static void test_frequency(void) {
     assertText("1.80 GHz", formatFrequency(1800.0));
     assertText("900 MHz", formatFrequency(900.0));
@@ -85,5 +99,7 @@ void suite_units(void) {
     RUN_TEST(test_age);
     RUN_TEST(test_temperature_and_percent);
     RUN_TEST(test_used_of_total);
+    RUN_TEST(test_shared_unit);
+    RUN_TEST(test_shared_unit_invalid);
     RUN_TEST(test_frequency);
 }

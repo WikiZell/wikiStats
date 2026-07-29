@@ -9,6 +9,7 @@
 #include "../app_state.h"
 #include "../log.h"
 #include "ota_service.h"
+#include "screenshot.h"
 #include "web_server.h"
 #include "wifi_manager.h"
 
@@ -236,6 +237,9 @@ void startOnlineServices() {
     }
     if (telnetEnabled) {
         fplog::startConsole(telnetPort);
+        // The frame grabber sits on the next port up and follows the same switch:
+        // both are read-only diagnostic channels, so they are enabled together.
+        shot::begin(static_cast<uint16_t>(telnetPort + 1));
     }
     if (otaEnabled) {
         ota().begin(hostname, otaPassword);
@@ -257,6 +261,7 @@ void stopOnlineServices() {
     g_mdns.end();
     ota().end();
     fplog::stopConsole();
+    shot::end();
     g_servicesStarted = false;
     app::AppState& state = app::state();
     app::AppState::Lock lock(state);
@@ -316,6 +321,7 @@ void networkTask(void*) {
 
         wifi().loop(now);
         fplog::pump();
+        shot::poll();
 
         const bool online = WiFi.status() == WL_CONNECTED;
         if (online) {

@@ -31,11 +31,17 @@ flowchart LR
 
 ## What you get
 
+![The dashboard on a real ESP32-2432S028R](docs/images/dashboard.png)
+
+*Captured from the device itself with `tools/screenshot.py`. CPU is over its
+critical threshold and the temperature over its warning threshold — note that both
+carry a text tag as well as a colour.*
+
 **On the panel** — CPU percentage and temperature, RAM bar with used/total, storage
 bar with used/free/total, download and upload rates, uptime, how old the reading is,
 and small CPU and RAM sparklines. Warning and critical states are shown with a text
 tag as well as a colour, so they survive a glossy resistive overlay and colour-blind
-eyes alike.
+eyes alike. Swipe or use the arrows at the bottom to change machine.
 
 **On any browser** — a configuration website served from the panel itself. Devices,
 Wi-Fi, MQTT, thresholds, carousel, brightness, backup, firmware update. It works
@@ -268,6 +274,12 @@ nc wikistats-XXXX.local 23
 
 Every log line also goes to TCP port 23 and to `GET /api/logs`. It is output-only:
 anything typed at it is discarded, so it can never become a command channel.
+
+You can also see what is on the screen without being in the room:
+
+```bash
+python tools/screenshot.py wikistats-XXXX.local dashboard.png
+```
 
 Firmware updates over the air (the password goes in an environment variable —
 `--upload-flags` is not a `pio run` option):

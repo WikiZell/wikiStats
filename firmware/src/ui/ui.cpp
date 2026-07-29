@@ -10,6 +10,7 @@
 #include "../hal/display_hal.h"
 #include "../log.h"
 #include "../net/net_task.h"
+#include "../net/screenshot.h"
 #include "../net/wifi_manager.h"
 #include "fp_carousel.h"
 #include "fp_gesture.h"
@@ -76,6 +77,7 @@ struct Dashboard {
     lv_obj_t* diskTag = nullptr;
     lv_obj_t* diskBar = nullptr;
     lv_obj_t* diskDetail = nullptr;
+    lv_obj_t* diskFree = nullptr;
 
     lv_obj_t* netCard = nullptr;
     lv_obj_t* rxLabel = nullptr;
@@ -85,17 +87,56 @@ struct Dashboard {
     lv_obj_t* uptimeLabel = nullptr;
     lv_obj_t* ageLabel = nullptr;
 
-    lv_obj_t* dots = nullptr;
+    lv_obj_t* dots[12] = {nullptr};
     lv_obj_t* gear = nullptr;
+    lv_obj_t* prevButton = nullptr;
+    lv_obj_t* nextButton = nullptr;
     lv_obj_t* emptyLabel = nullptr;
 };
 Dashboard g_ui;
+
+// ---- dashboard geometry, in one place so the cards and the tap hit-test cannot
+// drift apart.
+constexpr lv_coord_t kRow1Y = 30;
+constexpr lv_coord_t kRow1H = 78;
+constexpr lv_coord_t kRow2Y = 112;
+constexpr lv_coord_t kRow2H = 62;
+constexpr lv_coord_t kStripY = 177;
+constexpr lv_coord_t kStripH = 28;
+constexpr lv_coord_t kFooterY = 207;
+constexpr lv_coord_t kFooterHeight = 31;
+constexpr uint8_t kMaxDots = 12;
+constexpr lv_coord_t kCardW = 152;
+constexpr lv_coord_t kLeftX = 4;
+constexpr lv_coord_t kRightX = 164;
+
+struct Rect {
+    lv_coord_t x;
+    lv_coord_t y;
+    lv_coord_t w;
+    lv_coord_t h;
+    bool contains(int16_t px, int16_t py) const {
+        return px >= x && px < x + w && py >= y && py < y + h;
+    }
+};
+
+constexpr Rect kHeaderRect{0, 0, kScreenW, kHeaderH};
+constexpr Rect kCpuRect{kLeftX, kRow1Y, kCardW, kRow1H};
+constexpr Rect kRamRect{kRightX, kRow1Y, kCardW, kRow1H};
+constexpr Rect kDiskRect{kLeftX, kRow2Y, kCardW, kRow2H};
+constexpr Rect kNetRect{kRightX, kRow2Y, kCardW, kRow2H};
+constexpr Rect kDotsRect{52, kFooterY, 160, kFooterHeight};
 
 // ------------------------------------------------------------ LVGL glue
 
 void flushCallback(lv_disp_drv_t* driver, const lv_area_t* area, lv_color_t* colours) {
     hal::display().flush(area->x1, area->y1, area->x2, area->y2,
                          reinterpret_cast<uint16_t*>(colours));
+    // Same pixels, second destination: while a screenshot is being captured the
+    // band goes straight to the socket instead of being buffered, because a full
+    // frame is 150 KiB and this board does not have it to spare.
+    shot::writeBand(area->x1, area->y1, area->x2, area->y2,
+                    reinterpret_cast<const uint16_t*>(colours));
     lv_disp_flush_ready(driver);
 }
 
@@ -125,7 +166,8 @@ struct PageSnapshot {
     fp::Telemetry telemetry;
     uint8_t cpuHistory[fp::kHistoryPoints];
     uint8_t ramHistory[fp::kHistoryPoints];
-    size_t historyCount = 0;
+    size_t cpuCount = 0;
+    size_t ramCount = 0;
     uint32_t ageSeconds = 0;
     fp::Thresholds thresholds;
     int pageIndex = 0;
@@ -157,9 +199,12 @@ bool snapshotPage(PageSnapshot& out) {
     out.freshness = device.announcedOffline
                         ? fp::Freshness::Offline
                         : fp::freshnessFor(out.ageSeconds, device.everReceived, out.thresholds);
-    out.historyCount = fp::kHistoryPoints;
-    for (size_t i = 0; i < fp::kHistoryPoints; ++i) {
+    out.cpuCount = device.cpuHistory.size();
+    out.ramCount = device.ramHistory.size();
+    for (size_t i = 0; i < out.cpuCount; ++i) {
         out.cpuHistory[i] = device.cpuHistory.at(i);
+    }
+    for (size_t i = 0; i < out.ramCount; ++i) {
         out.ramHistory[i] = device.ramHistory.at(i);
     }
     out.valid = true;
@@ -190,8 +235,17 @@ void setChartFrom(lv_obj_t* chart, lv_chart_series_t* series, const uint8_t* his
     if (chart == nullptr || series == nullptr) {
         return;
     }
-    const uint16_t points = static_cast<uint16_t>(count);
-    lv_chart_set_point_count(chart, points);
+    // Only plot the samples that exist. Fixing the point count at the ring's
+    // capacity left a freshly booted panel drawing its trace squashed into the
+    // left sixth of the card, which reads as a rendering fault rather than as a
+    // history that has not filled up yet.
+    if (count < 2) {
+        lv_chart_set_point_count(chart, 1);
+        series->y_points[0] = LV_CHART_POINT_NONE;
+        lv_chart_refresh(chart);
+        return;
+    }
+    lv_chart_set_point_count(chart, static_cast<uint16_t>(count));
     for (size_t i = 0; i < count; ++i) {
         const uint8_t value = history[i];
         series->y_points[i] =
@@ -385,9 +439,33 @@ void onGearClicked(lv_event_t*) {
     showSettings();
 }
 
-void onDotsLongPressed(lv_event_t*) {
+void changePage(int delta, bool animate);
+void renderDots(int count, int active);
+
+void onPrevPage(lv_event_t*) {
     noteInteraction();
-    showDeviceList();
+    changePage(-1, true);
+}
+
+void onNextPage(lv_event_t*) {
+    noteInteraction();
+    changePage(+1, true);
+}
+
+lv_obj_t* makeNavButton(lv_obj_t* parent, const char* symbol, lv_coord_t x, lv_coord_t y,
+                        lv_coord_t w) {
+    lv_obj_t* button = lv_btn_create(parent);
+    lv_obj_set_pos(button, x, y);
+    lv_obj_set_size(button, w, kFooterHeight);
+    lv_obj_set_style_bg_color(button, kColorCard, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(button, kColorAccent, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_radius(button, 6, LV_PART_MAIN);
+    lv_obj_set_style_border_width(button, 0, LV_PART_MAIN);
+    lv_obj_t* label = lv_label_create(button);
+    lv_label_set_text(label, symbol);
+    lv_obj_set_style_text_color(label, kColorText, LV_PART_MAIN);
+    lv_obj_center(label);
+    return button;
 }
 
 // ------------------------------------------------------------ dashboard
@@ -420,72 +498,83 @@ void buildDashboard() {
                                258, 5);
     g_ui.pageLabel = makeLabel(g_ui.header, "0/0", &lv_font_montserrat_12, kColorTextDim, 284, 7);
 
+    // Cards are NOT LVGL-clickable. LVGL fires CLICKED whenever a press and its
+    // release land inside the same object, and a 45 px swipe fits comfortably
+    // inside a 152 px card - so swiping across a card used to open its dialog.
+    // Taps are dispatched by hit-test in processTouch() instead, from a gesture
+    // the detector has already classified as a tap rather than a swipe.
+
     // ---- CPU card
-    g_ui.cpuCard = makeCard(g_dashboard, kGutter, kHeaderH + kGutter, 152, 76);
-    lv_obj_add_flag(g_ui.cpuCard, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_ui.cpuCard, showCpuDetail, LV_EVENT_CLICKED, nullptr);
+    g_ui.cpuCard = makeCard(g_dashboard, kLeftX, kRow1Y, kCardW, kRow1H);
     makeLabel(g_ui.cpuCard, "CPU", &lv_font_montserrat_12, kColorTextDim, 0, 0);
-    g_ui.cpuTag = makeLabel(g_ui.cpuCard, "", &lv_font_montserrat_12, kColorWarning, 110, 0);
-    g_ui.cpuValue = makeLabel(g_ui.cpuCard, "--", &lv_font_montserrat_20, kColorText, 0, 14);
-    g_ui.cpuTemp = makeLabel(g_ui.cpuCard, "--", &lv_font_montserrat_14, kColorTextDim, 88, 24);
-    g_ui.cpuTempTag = makeLabel(g_ui.cpuCard, "", &lv_font_montserrat_12, kColorWarning, 88, 40);
+    g_ui.cpuTag = makeLabel(g_ui.cpuCard, "", &lv_font_montserrat_12, kColorWarning, 108, 0);
+    g_ui.cpuValue = makeLabel(g_ui.cpuCard, "--", &lv_font_montserrat_20, kColorText, 0, 13);
+    g_ui.cpuTemp = makeLabel(g_ui.cpuCard, "--", &lv_font_montserrat_14, kColorTextDim, 84, 16);
+    g_ui.cpuTempTag = makeLabel(g_ui.cpuCard, "", &lv_font_montserrat_12, kColorWarning, 84, 33);
     g_ui.cpuChart = makeSparkline(g_ui.cpuCard, 0, 48, 142, 18, &g_ui.cpuSeries);
 
     // ---- RAM card
-    g_ui.ramCard = makeCard(g_dashboard, 164, kHeaderH + kGutter, 152, 76);
-    lv_obj_add_flag(g_ui.ramCard, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_ui.ramCard, showMemoryDetail, LV_EVENT_CLICKED, nullptr);
+    // The sparkline is a full-width strip at the bottom, the same as CPU. It used
+    // to sit beside the "used / total" text, where a nearly flat memory trace drew
+    // what looked like a stray rule straight through the numbers.
+    g_ui.ramCard = makeCard(g_dashboard, kRightX, kRow1Y, kCardW, kRow1H);
     makeLabel(g_ui.ramCard, "RAM", &lv_font_montserrat_12, kColorTextDim, 0, 0);
-    g_ui.ramTag = makeLabel(g_ui.ramCard, "", &lv_font_montserrat_12, kColorWarning, 110, 0);
-    g_ui.ramValue = makeLabel(g_ui.ramCard, "--", &lv_font_montserrat_20, kColorText, 0, 12);
-    g_ui.ramBar = makeBar(g_ui.ramCard, 0, 36, 142, 6);
-    g_ui.ramDetail = makeLabel(g_ui.ramCard, "--", &lv_font_montserrat_12, kColorTextDim, 0, 44);
-    g_ui.ramChart = makeSparkline(g_ui.ramCard, 78, 44, 64, 18, &g_ui.ramSeries);
+    g_ui.ramTag = makeLabel(g_ui.ramCard, "", &lv_font_montserrat_12, kColorWarning, 108, 0);
+    g_ui.ramValue = makeLabel(g_ui.ramCard, "--", &lv_font_montserrat_20, kColorText, 0, 13);
+    g_ui.ramDetail = makeLabel(g_ui.ramCard, "--", &lv_font_montserrat_12, kColorTextDim, 54, 20);
+    g_ui.ramBar = makeBar(g_ui.ramCard, 0, 40, 142, 6);
+    g_ui.ramChart = makeSparkline(g_ui.ramCard, 0, 50, 142, 16, &g_ui.ramSeries);
 
     // ---- storage card
-    g_ui.diskCard = makeCard(g_dashboard, kGutter, 110, 152, 58);
-    lv_obj_add_flag(g_ui.diskCard, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_ui.diskCard, showStorageDetail, LV_EVENT_CLICKED, nullptr);
-    makeLabel(g_ui.diskCard, "DISK", &lv_font_montserrat_12, kColorTextDim, 0, 0);
-    g_ui.diskTag = makeLabel(g_ui.diskCard, "", &lv_font_montserrat_12, kColorWarning, 110, 0);
-    g_ui.diskValue = makeLabel(g_ui.diskCard, "--", &lv_font_montserrat_16, kColorText, 40, 0);
-    g_ui.diskBar = makeBar(g_ui.diskCard, 0, 20, 142, 6);
-    g_ui.diskDetail = makeLabel(g_ui.diskCard, "--", &lv_font_montserrat_12, kColorTextDim, 0, 30);
+    g_ui.diskCard = makeCard(g_dashboard, kLeftX, kRow2Y, kCardW, kRow2H);
+    makeLabel(g_ui.diskCard, "DISK", &lv_font_montserrat_12, kColorTextDim, 0, 1);
+    g_ui.diskValue = makeLabel(g_ui.diskCard, "--", &lv_font_montserrat_16, kColorText, 40, -2);
+    g_ui.diskTag = makeLabel(g_ui.diskCard, "", &lv_font_montserrat_12, kColorWarning, 108, 1);
+    // The bar sits clear of the descenders of the 16 px value above it; at y=15 it
+    // clipped the bottom of "DISK 54%".
+    g_ui.diskBar = makeBar(g_ui.diskCard, 0, 19, 142, 5);
+    g_ui.diskDetail = makeLabel(g_ui.diskCard, "--", &lv_font_montserrat_12, kColorTextDim, 0, 27);
+    g_ui.diskFree = makeLabel(g_ui.diskCard, "--", &lv_font_montserrat_12, kColorTextDim, 0, 38);
 
     // ---- network card
-    g_ui.netCard = makeCard(g_dashboard, 164, 110, 152, 58);
-    lv_obj_add_flag(g_ui.netCard, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_ui.netCard, showNetworkDetail, LV_EVENT_CLICKED, nullptr);
-    makeLabel(g_ui.netCard, "NET", &lv_font_montserrat_12, kColorTextDim, 0, 0);
-    makeLabel(g_ui.netCard, LV_SYMBOL_DOWN, &lv_font_montserrat_12, kColorAccent, 0, 16);
-    g_ui.rxLabel = makeLabel(g_ui.netCard, "--", &lv_font_montserrat_14, kColorText, 18, 14);
-    makeLabel(g_ui.netCard, LV_SYMBOL_UP, &lv_font_montserrat_12, kColorAccent, 0, 34);
-    g_ui.txLabel = makeLabel(g_ui.netCard, "--", &lv_font_montserrat_14, kColorText, 18, 32);
+    g_ui.netCard = makeCard(g_dashboard, kRightX, kRow2Y, kCardW, kRow2H);
+    makeLabel(g_ui.netCard, "NET", &lv_font_montserrat_12, kColorTextDim, 0, 1);
+    makeLabel(g_ui.netCard, LV_SYMBOL_DOWN, &lv_font_montserrat_12, kColorAccent, 0, 18);
+    g_ui.rxLabel = makeLabel(g_ui.netCard, "--", &lv_font_montserrat_14, kColorText, 18, 16);
+    makeLabel(g_ui.netCard, LV_SYMBOL_UP, &lv_font_montserrat_12, kColorAccent, 0, 36);
+    g_ui.txLabel = makeLabel(g_ui.netCard, "--", &lv_font_montserrat_14, kColorText, 18, 34);
 
     // ---- status strip
-    g_ui.statusStrip = makeCard(g_dashboard, kGutter, 172, 312, 34);
-    makeLabel(g_ui.statusStrip, "UP", &lv_font_montserrat_12, kColorTextDim, 0, 2);
-    g_ui.uptimeLabel = makeLabel(g_ui.statusStrip, "--", &lv_font_montserrat_14, kColorText, 24, 0);
-    makeLabel(g_ui.statusStrip, "UPDATED", &lv_font_montserrat_12, kColorTextDim, 160, 2);
-    g_ui.ageLabel = makeLabel(g_ui.statusStrip, "--", &lv_font_montserrat_14, kColorText, 232, 0);
+    g_ui.statusStrip = makeCard(g_dashboard, kLeftX, kStripY, 312, kStripH);
+    makeLabel(g_ui.statusStrip, "UP", &lv_font_montserrat_12, kColorTextDim, 0, 3);
+    g_ui.uptimeLabel = makeLabel(g_ui.statusStrip, "--", &lv_font_montserrat_14, kColorText, 22, 1);
+    makeLabel(g_ui.statusStrip, "UPDATED", &lv_font_montserrat_12, kColorTextDim, 148, 3);
+    g_ui.ageLabel = makeLabel(g_ui.statusStrip, "--", &lv_font_montserrat_14, kColorText, 218, 1);
 
-    // ---- footer
-    g_ui.dots = makeLabel(g_dashboard, "", &lv_font_montserrat_14, kColorTextDim, 8, 214);
-    lv_obj_set_size(g_ui.dots, 240, 24);
-    lv_obj_add_flag(g_ui.dots, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(g_ui.dots, onDotsLongPressed, LV_EVENT_LONG_PRESSED, nullptr);
+    // ---- footer: an explicit way to change page.
+    // Swiping is the intended gesture, but nothing on screen said so, and a swipe
+    // that starts on a card is easy to get wrong. These buttons make the action
+    // discoverable and give a reliable fallback on a resistive panel.
+    g_ui.prevButton = makeNavButton(g_dashboard, LV_SYMBOL_LEFT, kLeftX, kFooterY, 44);
+    lv_obj_add_event_cb(g_ui.prevButton, onPrevPage, LV_EVENT_CLICKED, nullptr);
 
-    g_ui.gear = lv_btn_create(g_dashboard);
-    lv_obj_set_pos(g_ui.gear, 268, 208);
-    lv_obj_set_size(g_ui.gear, 48, 30);
-    lv_obj_set_style_bg_color(g_ui.gear, kColorCard, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(g_ui.gear, kColorAccent, LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_radius(g_ui.gear, 6, LV_PART_MAIN);
-    lv_obj_set_style_border_width(g_ui.gear, 0, LV_PART_MAIN);
-    lv_obj_t* gearLabel = lv_label_create(g_ui.gear);
-    lv_label_set_text(gearLabel, LV_SYMBOL_SETTINGS);
-    lv_obj_set_style_text_color(gearLabel, kColorText, LV_PART_MAIN);
-    lv_obj_center(gearLabel);
+    // Real dots rather than "#  -  -" in a text label: the ASCII version was the
+    // one part of the footer that looked like a placeholder.
+    for (uint8_t i = 0; i < kMaxDots; ++i) {
+        lv_obj_t* dot = lv_obj_create(g_dashboard);
+        lv_obj_set_size(dot, 8, 8);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_border_width(dot, 0, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(dot, kColorBorder, LV_PART_MAIN);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+        g_ui.dots[i] = dot;
+    }
+
+    g_ui.nextButton = makeNavButton(g_dashboard, LV_SYMBOL_RIGHT, 216, kFooterY, 44);
+    lv_obj_add_event_cb(g_ui.nextButton, onNextPage, LV_EVENT_CLICKED, nullptr);
+
+    g_ui.gear = makeNavButton(g_dashboard, LV_SYMBOL_SETTINGS, 264, kFooterY, 52);
     lv_obj_add_event_cb(g_ui.gear, onGearClicked, LV_EVENT_CLICKED, nullptr);
 
     // Shown instead of the tiles when no device has been added yet.
@@ -496,8 +585,9 @@ void buildDashboard() {
 }
 
 void setTilesHidden(bool hidden) {
-    lv_obj_t* tiles[] = {g_ui.cpuCard, g_ui.ramCard, g_ui.diskCard, g_ui.netCard,
-                         g_ui.statusStrip};
+    lv_obj_t* tiles[] = {g_ui.cpuCard, g_ui.ramCard,     g_ui.diskCard,
+                         g_ui.netCard, g_ui.statusStrip, g_ui.prevButton,
+                         g_ui.nextButton};
     for (lv_obj_t* tile : tiles) {
         if (tile == nullptr) {
             continue;
@@ -539,7 +629,7 @@ void renderEmptyState() {
     lv_label_set_text(g_ui.emptyLabel, text);
     lv_label_set_text(g_ui.nameLabel, "WikiStats");
     lv_label_set_text(g_ui.pageLabel, "0/0");
-    lv_label_set_text(g_ui.dots, "");
+    renderDots(0, -1);
 }
 
 void renderPage(const PageSnapshot& page) {
@@ -580,7 +670,7 @@ void renderPage(const PageSnapshot& page) {
                       t.cpuTemperature.has ? fp::formatTemperature(t.cpuTemperature.value).c_str()
                                            : fp::kNoValue);
     applyLevel(g_ui.cpuTemp, g_ui.cpuTempTag, tempLevel);
-    setChartFrom(g_ui.cpuChart, g_ui.cpuSeries, page.cpuHistory, page.historyCount);
+    setChartFrom(g_ui.cpuChart, g_ui.cpuSeries, page.cpuHistory, page.cpuCount);
 
     // ---- RAM
     const fp::Level ramLevel =
@@ -599,11 +689,11 @@ void renderPage(const PageSnapshot& page) {
     }
     lv_label_set_text(g_ui.ramDetail,
                       (t.memUsed.has && t.memTotal.has)
-                          ? fp::formatUsedOfTotal(static_cast<double>(t.memUsed.value),
-                                                  static_cast<double>(t.memTotal.value))
+                          ? fp::formatSharedUnit(static_cast<double>(t.memUsed.value),
+                                                 static_cast<double>(t.memTotal.value))
                                 .c_str()
                           : fp::kNoValue);
-    setChartFrom(g_ui.ramChart, g_ui.ramSeries, page.ramHistory, page.historyCount);
+    setChartFrom(g_ui.ramChart, g_ui.ramSeries, page.ramHistory, page.ramCount);
 
     // ---- storage
     const fp::Level diskLevel =
@@ -618,14 +708,22 @@ void renderPage(const PageSnapshot& page) {
     lv_obj_set_style_bg_color(g_ui.diskBar,
                               diskLevel == fp::Level::Ok ? kColorAccent : colourFor(diskLevel),
                               LV_PART_INDICATOR);
-    if (t.diskUsed.has && t.diskTotal.has && t.diskFree.has) {
-        char detail[64];
-        snprintf(detail, sizeof(detail), "%s used, %s free",
-                 fp::formatBytes(static_cast<double>(t.diskUsed.value)).c_str(),
+    // "27.7 of 62.5 GiB" reads shorter than "27.7 GiB used of 62.5 GiB" and, because
+    // both numbers share the total's scale, they line up column-wise as the values
+    // change.
+    lv_label_set_text(g_ui.diskDetail,
+                      (t.diskUsed.has && t.diskTotal.has)
+                          ? fp::formatSharedUnit(static_cast<double>(t.diskUsed.value),
+                                                 static_cast<double>(t.diskTotal.value))
+                                .c_str()
+                          : fp::kNoValue);
+    if (t.diskFree.has) {
+        char freeText[40];
+        snprintf(freeText, sizeof(freeText), "%s free",
                  fp::formatBytes(static_cast<double>(t.diskFree.value)).c_str());
-        lv_label_set_text(g_ui.diskDetail, detail);
+        lv_label_set_text(g_ui.diskFree, freeText);
     } else {
-        lv_label_set_text(g_ui.diskDetail, fp::kNoValue);
+        lv_label_set_text(g_ui.diskFree, fp::kNoValue);
     }
 
     // ---- network
@@ -641,16 +739,31 @@ void renderPage(const PageSnapshot& page) {
     lv_label_set_text(g_ui.ageLabel, fp::formatAge(page.ageSeconds).c_str());
     lv_obj_set_style_text_color(g_ui.ageLabel, colourFor(page.freshness), LV_PART_MAIN);
 
-    // ---- page dots (text, so they survive any font without extra assets)
-    char dots[64] = {0};
-    const int shown = page.pageCount > 20 ? 20 : page.pageCount;
-    size_t offset = 0;
-    for (int i = 0; i < shown && offset + 3 < sizeof(dots); ++i) {
-        dots[offset++] = (i == page.pageIndex) ? '#' : '-';
-        dots[offset++] = ' ';
+    renderDots(page.pageCount, page.pageIndex);
+}
+
+// Centres up to kMaxDots indicators in the footer strip. Beyond that the header's
+// "4/17" counter is the honest signal and drawing seventeen dots would be noise.
+void renderDots(int count, int active) {
+    const int shown = count > kMaxDots ? kMaxDots : count;
+    const lv_coord_t spacing = 14;
+    const lv_coord_t totalWidth = shown > 0 ? (shown - 1) * spacing + 8 : 0;
+    const lv_coord_t startX = kDotsRect.x + (kDotsRect.w - totalWidth) / 2;
+    const lv_coord_t y = kFooterY + (kFooterHeight - 8) / 2;
+
+    for (int i = 0; i < kMaxDots; ++i) {
+        lv_obj_t* dot = g_ui.dots[i];
+        if (dot == nullptr) {
+            continue;
+        }
+        if (i >= shown) {
+            lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(dot, startX + i * spacing, y);
+        lv_obj_set_style_bg_color(dot, i == active ? kColorAccent : kColorBorder, LV_PART_MAIN);
     }
-    dots[offset] = '\0';
-    lv_label_set_text(g_ui.dots, dots);
 }
 
 void render() {
@@ -751,6 +864,24 @@ void applyBacklight(uint32_t nowMs) {
 
 // -------------------------------------------------------------- gestures
 
+// Dispatches a tap the gesture detector has already accepted. Because the detector
+// rejects anything that moved beyond the slop threshold, a swipe can never reach
+// this - which is the whole point of not letting LVGL own these hit boxes.
+void dispatchTap(int16_t x, int16_t y) {
+    if (kHeaderRect.contains(x, y)) {
+        showDeviceInfo(nullptr);
+    } else if (kCpuRect.contains(x, y)) {
+        showCpuDetail(nullptr);
+    } else if (kRamRect.contains(x, y)) {
+        showMemoryDetail(nullptr);
+    } else if (kDiskRect.contains(x, y)) {
+        showStorageDetail(nullptr);
+    } else if (kNetRect.contains(x, y)) {
+        showNetworkDetail(nullptr);
+    }
+    // The footer belongs to real LVGL buttons; nothing to do here.
+}
+
 void processTouch(uint32_t nowMs) {
     const bool wasPressed = g_gestures.active();
     hal::TouchPoint point;
@@ -763,20 +894,36 @@ void processTouch(uint32_t nowMs) {
     } else if (pressed && wasPressed) {
         g_gestures.move(point.x, point.y, nowMs);
         g_lastInteractionMs = nowMs;
-        if (g_gestures.pollLongPress(nowMs) && lv_scr_act() == g_dashboard &&
-            point.y > kScreenH - kFooterH - 8) {
+        // Only arm the long press over the page indicator. Polling it everywhere
+        // latched `longPressFired_` on any slow press, and a press that has fired a
+        // long press deliberately produces no tap on release - so a leisurely tap
+        // on a card did nothing at all.
+        const bool overIndicator = kDotsRect.contains(g_gestures.startX(), g_gestures.startY());
+        if (overIndicator && lv_scr_act() == g_dashboard && g_gestures.pollLongPress(nowMs)) {
             showDeviceList();
         }
     } else if (!pressed && wasPressed) {
+        const int16_t releaseX = g_gestures.startX();
+        const int16_t releaseY = g_gestures.startY();
         const fp::Gesture gesture = g_gestures.release(g_touch.x, g_touch.y, nowMs);
         noteInteraction();
         if (lv_scr_act() != g_dashboard) {
             return;  // other screens use LVGL's own widgets, not page swipes
         }
-        if (gesture == fp::Gesture::SwipeLeft) {
-            changePage(+1, true);
-        } else if (gesture == fp::Gesture::SwipeRight) {
-            changePage(-1, true);
+        switch (gesture) {
+            case fp::Gesture::SwipeLeft:
+                changePage(+1, true);
+                break;
+            case fp::Gesture::SwipeRight:
+                changePage(-1, true);
+                break;
+            case fp::Gesture::Tap:
+                // Hit-tested from where the finger went down, so a tap that drifts
+                // a few pixels across a card boundary still opens what was aimed at.
+                dispatchTap(releaseX, releaseY);
+                break;
+            default:
+                break;
         }
     }
 }
@@ -919,6 +1066,9 @@ void tick() {
         advanceCarousel(now);
     }
     applyBacklight(now);
+    // Arms a pending frame capture before the redraw, so the flush callback can
+    // stream the bands out as they are produced.
+    shot::serviceUi();
     lv_timer_handler();
 }
 

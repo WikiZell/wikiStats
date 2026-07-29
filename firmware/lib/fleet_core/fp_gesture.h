@@ -35,7 +35,10 @@ struct GestureConfig {
     uint32_t minSwipeDurationMs = 30;
     int16_t tapSlop = 12;
     uint32_t longPressMs = 600;
-    uint32_t maxTapDurationMs = 500;
+    // Generous on purpose: a resistive panel needs a firm press, and people press
+    // firmly for longer than they think. At 500 ms a deliberate, careful tap was
+    // being classified as "nothing happened".
+    uint32_t maxTapDurationMs = 900;
 };
 
 const char* gestureName(Gesture gesture);

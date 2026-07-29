@@ -46,6 +46,28 @@ static void test_tap_is_recognised(void) {
     TEST_ASSERT_EQUAL(Gesture::Tap, detector.release(163, 122, 5120));
 }
 
+static void test_a_slow_deliberate_tap_still_counts(void) {
+    // A resistive panel needs a firm press, and people hold longer than they think.
+    // At the old 500 ms ceiling this returned None and the card never opened.
+    GestureDetector detector;
+    detector.press(80, 70, 1000);
+    TEST_ASSERT_EQUAL(Gesture::Tap, detector.release(83, 72, 1800));
+}
+
+static void test_a_very_long_press_is_not_a_tap(void) {
+    GestureDetector detector;
+    detector.press(80, 70, 1000);
+    TEST_ASSERT_EQUAL(Gesture::None, detector.release(83, 72, 2500));
+}
+
+static void test_long_press_only_arms_when_polled(void) {
+    // The UI polls for a long press only over the page indicator. A press
+    // elsewhere is never polled, so it must still release as an ordinary tap.
+    GestureDetector detector;
+    detector.press(160, 120, 1000);
+    TEST_ASSERT_EQUAL(Gesture::Tap, detector.release(161, 121, 1700));
+}
+
 static void test_jitter_within_slop_is_still_a_tap(void) {
     // A resistive panel reports a few pixels of drift under changing pressure.
     GestureDetector detector;
@@ -108,6 +130,9 @@ void suite_gesture(void) {
     RUN_TEST(test_diagonal_within_tolerance_still_counts);
     RUN_TEST(test_slow_drag_is_not_a_swipe);
     RUN_TEST(test_tap_is_recognised);
+    RUN_TEST(test_a_slow_deliberate_tap_still_counts);
+    RUN_TEST(test_a_very_long_press_is_not_a_tap);
+    RUN_TEST(test_long_press_only_arms_when_polled);
     RUN_TEST(test_jitter_within_slop_is_still_a_tap);
     RUN_TEST(test_long_press_fires_once_while_held);
     RUN_TEST(test_long_press_cancelled_by_movement);
