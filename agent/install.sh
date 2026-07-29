@@ -5,10 +5,13 @@
 # Supports Debian, Ubuntu and Raspberry Pi OS (bookworm and newer; anything with
 # Python >= 3.11 and systemd).
 #
+#   curl -fsSL https://raw.githubusercontent.com/WikiZell/wikiStats/main/agent/install.sh | sudo bash
+#
 #   sudo ./install.sh                 # interactive, safe defaults
 #   sudo ./install.sh --yes           # non-interactive
 #   sudo ./install.sh --port 9000     # override the HTTP port
 #   sudo ./install.sh --token auto    # enable bearer auth with a generated token
+#   sudo ./install.sh --no-service    # install but do not run at boot
 #
 set -euo pipefail
 
@@ -27,7 +30,11 @@ ASSUME_YES=0
 PORT=""
 TOKEN=""
 START_SERVICE=1
+ENABLE_SERVICE=""   # empty = ask; "yes" / "no" once decided
 MQTT_HOST=""
+
+REPO_URL="${WIKISTATS_REPO:-https://github.com/WikiZell/wikiStats}"
+REPO_REF="${WIKISTATS_REF:-main}"
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[0;33m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 if [ ! -t 1 ]; then RED=""; GREEN=""; YELLOW=""; BOLD=""; NC=""; fi
@@ -44,10 +51,19 @@ Usage: sudo ./install.sh [options]
   --port PORT         HTTP port to write into a freshly created config (default 8770)
   --token VALUE|auto  Enable bearer authentication. "auto" generates a 48-char token
   --mqtt-host HOST    Pre-fill and enable MQTT publishing to this broker
-  --no-start          Install and enable the service but do not start it
+  --service           Run at boot (systemd). Default; skips the question
+  --no-service        Install only; do not enable or start anything
+  --no-start          Enable the service for next boot but do not start it now
   --help, -h          This message
+
+Environment:
+  WIKISTATS_REPO      Repository to fetch when piped from curl
+  WIKISTATS_REF       Branch or tag to fetch (default: main)
 EOF
 }
+
+# Kept verbatim so the bootstrap path can hand them to the downloaded copy.
+ORIGINAL_ARGS=("$@")
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -55,12 +71,30 @@ while [ $# -gt 0 ]; do
         --port)        PORT="${2:?--port needs a value}"; shift ;;
         --token)       TOKEN="${2:?--token needs a value}"; shift ;;
         --mqtt-host)   MQTT_HOST="${2:?--mqtt-host needs a value}"; shift ;;
+        --service)     ENABLE_SERVICE="yes" ;;
+        --no-service)  ENABLE_SERVICE="no" ;;
         --no-start)    START_SERVICE=0 ;;
         -h|--help)     usage; exit 0 ;;
         *)             die "unknown option: $1 (try --help)" ;;
     esac
     shift
 done
+
+# Reads one line from the terminal even when this script arrived on stdin from
+# `curl | sudo bash`. Falls back to the supplied default when there is no tty,
+# which is what happens in CI and in cloud-init.
+ask() {
+    local prompt="$1" fallback="$2" reply=""
+    if [ "$ASSUME_YES" -eq 1 ] || [ ! -r /dev/tty ]; then
+        # The prompt goes to stderr so that only the answer lands in $( ).
+        printf '%s %s (non-interactive)\n' "$prompt" "$fallback" >&2
+        printf '%s' "$fallback"
+        return 0
+    fi
+    printf '%s%s%s ' "${BOLD}" "$prompt" "${NC}" >&2
+    read -r reply </dev/tty || reply=""
+    printf '%s' "${reply:-$fallback}"
+}
 
 # --------------------------------------------------------------- preflight
 
@@ -92,7 +126,34 @@ if ! "$PYTHON" -c 'import venv' >/dev/null 2>&1; then
     die "the venv module is missing. Install it with: apt install python3-venv"
 fi
 
-[ -f "${SCRIPT_DIR}/pyproject.toml" ] || die "run this script from the agent/ directory of the repository"
+# ------------------------------------------------------------ bootstrap
+#
+# Piped from curl there is no repository next to the script, only the script. Fetch
+# the source tarball into a temporary directory and hand over to the copy inside it,
+# so the rest of this file can assume the tree is present either way.
+
+if [ ! -f "${SCRIPT_DIR}/pyproject.toml" ]; then
+    command -v curl >/dev/null 2>&1 || die "curl is required to bootstrap (apt install curl)"
+    command -v tar  >/dev/null 2>&1 || die "tar is required to bootstrap"
+
+    BOOTSTRAP_DIR="$(mktemp -d)"
+    # shellcheck disable=SC2064 - expand BOOTSTRAP_DIR now, not at trap time
+    trap "rm -rf '${BOOTSTRAP_DIR}'" EXIT
+
+    info "fetching ${REPO_URL} (${REPO_REF})"
+    if ! curl -fsSL "${REPO_URL}/archive/refs/heads/${REPO_REF}.tar.gz" \
+            | tar -xz -C "${BOOTSTRAP_DIR}"; then
+        die "could not download ${REPO_URL} at ref ${REPO_REF}"
+    fi
+
+    # The tarball's top-level directory is named after the repo and ref, and the
+    # exact casing is not worth guessing at.
+    BOOTSTRAP_AGENT="$(find "${BOOTSTRAP_DIR}" -mindepth 2 -maxdepth 3 -type f \
+        -name pyproject.toml -path '*/agent/*' -print -quit)"
+    [ -n "${BOOTSTRAP_AGENT}" ] || die "downloaded archive does not contain agent/pyproject.toml"
+
+    exec bash "$(dirname "${BOOTSTRAP_AGENT}")/install.sh" "${ORIGINAL_ARGS[@]}"
+fi
 
 # ------------------------------------------------------------ service user
 
@@ -115,6 +176,12 @@ rm -rf "${INSTALL_DIR}/src" "${INSTALL_DIR}/pyproject.toml" "${INSTALL_DIR}/READ
 cp -r "${SCRIPT_DIR}/src" "${INSTALL_DIR}/src"
 cp "${SCRIPT_DIR}/pyproject.toml" "${INSTALL_DIR}/pyproject.toml"
 [ -f "${SCRIPT_DIR}/README.md" ] && cp "${SCRIPT_DIR}/README.md" "${INSTALL_DIR}/README.md"
+# Ship the uninstaller alongside the application: someone removing this in two
+# years should not have to find the repository it came from.
+if [ -f "${SCRIPT_DIR}/uninstall.sh" ]; then
+    cp "${SCRIPT_DIR}/uninstall.sh" "${INSTALL_DIR}/uninstall.sh"
+    chmod 0755 "${INSTALL_DIR}/uninstall.sh"
+fi
 
 if [ ! -x "${INSTALL_DIR}/venv/bin/python" ]; then
     info "creating virtual environment"
@@ -137,14 +204,9 @@ if [ -f "${CONFIG_FILE}" ]; then
     backup="${CONFIG_FILE}.$(date +%Y%m%d%H%M%S).bak"
     cp -a "${CONFIG_FILE}" "${backup}"
     info "existing configuration backed up to ${backup}"
-    if [ "$ASSUME_YES" -eq 1 ]; then
-        write_config=0
-        info "keeping existing configuration (--yes)"
-    else
-        printf '%sOverwrite %s with a fresh default config? [y/N]%s ' "${BOLD}" "${CONFIG_FILE}" "${NC}"
-        read -r reply </dev/tty || reply="n"
-        case "$reply" in [yY]*) write_config=1 ;; *) write_config=0 ;; esac
-    fi
+    reply="$(ask "Overwrite ${CONFIG_FILE} with a fresh default config? [y/N]" 'n')"
+    case "$reply" in [yY]*) write_config=1 ;; *) write_config=0 ;; esac
+    [ "$write_config" -eq 0 ] && info "keeping existing configuration"
 fi
 
 if [ "$write_config" -eq 1 ]; then
@@ -188,9 +250,24 @@ info "installing systemd unit"
 cp "${SCRIPT_DIR}/packaging/${APP_NAME}.service" "${SERVICE_FILE}"
 chmod 0644 "${SERVICE_FILE}"
 systemctl daemon-reload
-systemctl enable "${APP_NAME}" >/dev/null
 
-if [ "$START_SERVICE" -eq 1 ]; then
+if [ -z "$ENABLE_SERVICE" ]; then
+    reply="$(ask 'Start WikiStats automatically at boot? [Y/n]' 'y')"
+    case "$reply" in
+        [nN]*) ENABLE_SERVICE="no" ;;
+        *)     ENABLE_SERVICE="yes" ;;
+    esac
+fi
+
+if [ "$ENABLE_SERVICE" = "yes" ]; then
+    systemctl enable "${APP_NAME}" >/dev/null
+    info "service enabled; it will start on every boot"
+else
+    systemctl disable "${APP_NAME}" >/dev/null 2>&1 || true
+    info "service installed but NOT enabled; it will not start at boot"
+fi
+
+if [ "$ENABLE_SERVICE" = "yes" ] && [ "$START_SERVICE" -eq 1 ]; then
     info "starting ${APP_NAME}"
     systemctl restart "${APP_NAME}"
     sleep 2
@@ -199,8 +276,8 @@ if [ "$START_SERVICE" -eq 1 ]; then
         journalctl -u "${APP_NAME}" -n 30 --no-pager || true
         die "installation finished but the service is not running"
     fi
-else
-    info "service enabled but not started (--no-start)"
+elif [ "$ENABLE_SERVICE" = "yes" ]; then
+    info "service enabled but not started now (--no-start)"
 fi
 
 # ---------------------------------------------------------------- summary
@@ -236,6 +313,21 @@ ${BOLD}FleetPanel agent installed.${NC}
     sudo systemctl restart ${APP_NAME}
 
 EOF
+
+if [ "$ENABLE_SERVICE" = "yes" ]; then
+    printf '  Runs at boot: %syes%s\n\n' "${GREEN}" "${NC}"
+else
+    cat <<EOF
+  Runs at boot: ${YELLOW}no${NC}
+
+  Start it once:
+    sudo systemctl start ${APP_NAME}
+
+  Or make it permanent later:
+    sudo systemctl enable --now ${APP_NAME}
+
+EOF
+fi
 
 if [ -n "$TOKEN" ] && [ "$write_config" -eq 1 ]; then
     cat <<EOF

@@ -69,17 +69,69 @@ lets a future Windows agent work with firmware built today.
 
 Details: [`docs/architecture.md`](docs/architecture.md).
 
-## Quick start
+## Installing the server (agent)
 
-### 1. Install an agent
+Run this on **every machine you want to watch** — Raspberry Pi, Debian, Ubuntu.
+One line, nothing to clone:
 
 ```bash
-git clone https://github.com/fleetpanel/wikistats.git
-cd wikistats/agent
-sudo ./install.sh
+curl -fsSL https://raw.githubusercontent.com/WikiZell/wikiStats/main/agent/install.sh | sudo bash
 ```
 
-It prints the URL when it is done. Check it:
+Prefer to read it before running it as root — always a reasonable instinct:
+
+```bash
+curl -fsSL -o wikistats-install.sh https://raw.githubusercontent.com/WikiZell/wikiStats/main/agent/install.sh
+```
+
+```bash
+less wikistats-install.sh && sudo bash wikistats-install.sh
+```
+
+### What it does, and what it asks
+
+It creates a `fleetpanel` system user, installs to `/opt/fleetpanel-agent` in its
+own virtualenv, writes `/etc/fleetpanel-agent/config.toml`, installs a hardened
+systemd unit, validates the configuration, and prints the URL.
+
+It asks you one question:
+
+```text
+Start WikiStats automatically at boot? [Y/n]
+```
+
+**Yes** enables the systemd service, so the agent comes back on its own after a
+reboot, a power cut or a crash. **No** installs everything but leaves it dormant;
+you can change your mind at any time with `sudo systemctl enable --now fleetpanel-agent`.
+
+If an existing `config.toml` is found it is backed up with a timestamp and you are
+asked before it is replaced. Nothing is overwritten silently.
+
+### Non-interactive
+
+For Ansible, cloud-init or a fleet of identical machines — no prompts, sensible
+answers assumed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/WikiZell/wikiStats/main/agent/install.sh | sudo bash -s -- --yes
+```
+
+| Flag | Effect |
+| ---- | ------ |
+| `--yes` | never prompt; keep any existing config; enable the service |
+| `--service` / `--no-service` | answer the boot question up front |
+| `--no-start` | enable for next boot, but do not start now |
+| `--port 9000` | HTTP port for a fresh config |
+| `--token auto` | turn on bearer authentication with a generated token |
+| `--mqtt-host broker.lan` | enable MQTT publishing |
+
+Example — a locked-down agent that starts at boot, with a token:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/WikiZell/wikiStats/main/agent/install.sh | sudo bash -s -- --yes --service --token auto
+```
+
+### Check it
 
 ```bash
 curl -s http://127.0.0.1:8770/api/v1/health
@@ -89,18 +141,70 @@ curl -s http://127.0.0.1:8770/api/v1/health
 { "status": "ok", "schema": "fleetpanel.telemetry.v1", "agent_version": "0.1.0" }
 ```
 
-Full walkthrough with a Raspberry Pi and a Debian example:
+### Manage it
+
+```bash
+sudo systemctl status fleetpanel-agent
+```
+
+```bash
+sudo journalctl -u fleetpanel-agent -f
+```
+
+```bash
+sudo systemctl restart fleetpanel-agent
+```
+
+Enable or disable automatic start after the fact:
+
+```bash
+sudo systemctl enable --now fleetpanel-agent
+```
+
+```bash
+sudo systemctl disable --now fleetpanel-agent
+```
+
+### Remove it
+
+Keeps `/etc/fleetpanel-agent` so a reinstall picks up where you left off:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/WikiZell/wikiStats/main/agent/uninstall.sh | sudo bash
+```
+
+Remove the configuration and the service user as well:
+
+```bash
+sudo /opt/fleetpanel-agent/uninstall.sh --purge
+```
+
+Full walkthrough, with a Raspberry Pi and a Debian example:
 [`docs/linux-installation.md`](docs/linux-installation.md).
 
-### 2. Build the web assets and flash the panel
+## Installing the firmware (panel)
+
+Needs [PlatformIO](https://platformio.org/install/cli) and Node 18+ on the machine
+with the USB cable, not on the panel.
 
 ```bash
-cd web && npm install && npm run build
+git clone https://github.com/WikiZell/wikiStats.git && cd wikiStats
 ```
 
+Build the configuration website first — it becomes the panel's filesystem image:
+
 ```bash
-cd ../firmware && pio run -e cyd
+cd web && npm install && npm run build && cd ..
 ```
+
+Build the firmware:
+
+```bash
+cd firmware && pio run -e cyd
+```
+
+Flash the filesystem, then the firmware. **Both are needed on a new board**; the
+filesystem holds the web interface and skipping it gives you a blank browser page:
 
 ```bash
 pio run -e cyd -t uploadfs
@@ -110,9 +214,22 @@ pio run -e cyd -t uploadfs
 pio run -e cyd -t upload
 ```
 
+Watch it come up:
+
+```bash
+pio device monitor -b 115200
+```
+
+On Windows add `--upload-port COM6`; on Linux the board is usually `/dev/ttyUSB0`
+and PlatformIO finds it by itself. If no port appears at all, install the **CH340**
+USB-serial driver.
+
+After the first USB flash you never need the cable again — see
+[updates over the air](#debugging-a-panel-that-is-already-on-the-wall).
+
 Full walkthrough: [`docs/esp32-installation.md`](docs/esp32-installation.md).
 
-### 3. First boot
+## First boot
 
 With no saved network the panel opens an access point called `FleetPanel-XXXX` and
 shows its name and address on screen.
@@ -131,7 +248,7 @@ flowchart TD
 Join it from a phone, set your Wi-Fi, then set an administrator password. Or do the
 whole thing on the touchscreen: gear → Wi-Fi.
 
-### 4. Add machines
+## Adding machines
 
 Agents advertising `_fleetpanel._tcp.local.` appear under **Discovered devices** —
 approve them, or switch on automatic adding. On a network where multicast is

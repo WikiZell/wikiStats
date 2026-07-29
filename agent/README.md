@@ -23,21 +23,32 @@ kind. Every endpoint is a `GET`. A test asserts that no non-`GET` route exists.
 
 ## Install
 
+One line, nothing to clone:
+
 ```bash
-git clone https://github.com/fleetpanel/wikistats.git
-cd wikistats/agent
-sudo ./install.sh
+curl -fsSL https://raw.githubusercontent.com/WikiZell/wikiStats/main/agent/install.sh | sudo bash
 ```
 
 The installer creates the `fleetpanel` system user, installs to
 `/opt/fleetpanel-agent` with its own virtualenv, writes
-`/etc/fleetpanel-agent/config.toml`, installs a hardened systemd unit, starts it, and
-prints the URL. An existing config is always backed up and never silently replaced.
+`/etc/fleetpanel-agent/config.toml`, installs a hardened systemd unit, validates the
+configuration before starting anything, and prints the URL. An existing config is
+always backed up and never silently replaced.
 
-With bearer authentication:
+It asks one question — whether to enable the systemd service so the agent restarts
+automatically after a reboot. Answer it up front with `--service` or `--no-service`,
+or skip every prompt with `--yes`.
+
+From a checkout instead:
 
 ```bash
-sudo ./install.sh --token auto
+cd agent && sudo ./install.sh
+```
+
+With bearer authentication, non-interactive:
+
+```bash
+sudo ./install.sh --yes --service --token auto
 ```
 
 Remove it, keeping the configuration:
