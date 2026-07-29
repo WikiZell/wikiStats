@@ -22,6 +22,7 @@ from __future__ import annotations
 import ipaddress
 import secrets
 from collections.abc import Sequence
+from typing import Callable
 
 from fastapi import HTTPException, Request, status
 
@@ -71,8 +72,31 @@ def token_matches(expected: str, presented: str | None) -> bool:
     return secrets.compare_digest(expected.encode("utf-8"), presented.encode("utf-8"))
 
 
+def auth_dependency(config: AgentConfig) -> Callable[[Request], None]:
+    """Build the FastAPI dependency that guards the protected routes.
+
+    This returns a plain function rather than the :class:`Authenticator` instance
+    itself, and that is load-bearing. FastAPI resolves a dependency's annotations
+    against the callable's ``__globals__``; a class instance has no ``__globals__``,
+    so with ``from __future__ import annotations`` in effect the annotation is the
+    string ``"Request"`` and cannot be resolved. FastAPI then falls back to treating
+    the parameter as an ordinary query parameter, and every protected route answers
+    ``422 {"loc": ["query", "request"]}`` instead of running.
+
+    Found on Debian 11 with Python 3.9. A nested function carries the module's
+    globals, so the annotation resolves on every supported interpreter.
+    """
+    authenticator = Authenticator(config)
+
+    def require_auth(request: Request) -> None:
+        authenticator.check(request)
+
+    return require_auth
+
+
 class Authenticator:
-    """Callable FastAPI dependency built from the validated config."""
+    """Authentication policy. Not used directly as a dependency - see
+    :func:`auth_dependency` for why."""
 
     def __init__(self, config: AgentConfig) -> None:
         self.mode = config.http.auth_mode

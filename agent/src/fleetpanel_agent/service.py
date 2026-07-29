@@ -134,11 +134,22 @@ class AgentService:
     def log_endpoints(self) -> None:
         from .collectors.network import ipv4_addresses
 
-        for address in ipv4_addresses() or ["<no address>"]:
-            _log.info(
-                "telemetry endpoint",
-                extra={"fields": {"url": f"http://{address}:{self.config.http.port}/api/v1/telemetry"}},
-            )
+        addresses = ipv4_addresses()
+        if not addresses:
+            _log.warning("no usable IPv4 address; the agent is not reachable")
+            return
+        # Only the primary: a container host has a dozen bridge addresses and
+        # printing one line each buries the one that matters. It is also the only
+        # one advertised over mDNS.
+        _log.info(
+            "telemetry endpoint",
+            extra={
+                "fields": {
+                    "url": f"http://{addresses[0]}:{self.config.http.port}/api/v1/telemetry",
+                    "other_addresses": len(addresses) - 1,
+                }
+            },
+        )
 
     def describe(self) -> dict[str, Any]:
         return {

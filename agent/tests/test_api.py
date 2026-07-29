@@ -236,6 +236,39 @@ def test_trusted_networks_empty_allows_everyone(open_client: TestClient) -> None
 # ============================================================ security unit tests
 
 
+def test_auth_dependency_request_annotation_resolves() -> None:
+    """Regression, found on Debian 11 / Python 3.9.
+
+    The dependency used to be an ``Authenticator`` instance. FastAPI resolves a
+    dependency's annotations against the callable's ``__globals__``, an instance has
+    none, and with ``from __future__ import annotations`` the annotation is the
+    string ``"Request"``. Unresolved, FastAPI treated it as a query parameter and
+    every protected route answered ``422 {"loc": ["query", "request"]}``.
+
+    Checking the resolved signature catches this on any interpreter, rather than
+    only on the ones where it happens to break.
+    """
+    from fastapi import Request as FastapiRequest
+    from fastapi.dependencies.utils import get_typed_signature
+
+    from fleetpanel_agent.security import auth_dependency
+
+    parameters = get_typed_signature(auth_dependency(AgentConfig())).parameters
+    assert list(parameters) == ["request"]
+    assert parameters["request"].annotation is FastapiRequest, (
+        "FastAPI could not resolve the Request annotation; protected routes will 422"
+    )
+
+
+def test_protected_routes_do_not_answer_422(open_client: TestClient) -> None:
+    """422 on a route with no parameters means dependency injection went wrong."""
+    for path in ("/api/v1/telemetry", "/api/v1/info", "/api/v1/config/public",
+                 "/api/v1/history?seconds=60"):
+        response = open_client.get(path)
+        assert response.status_code != 422, f"{path} -> 422 {response.text}"
+        assert response.status_code == 200, f"{path} -> {response.status_code}"
+
+
 def test_address_allowed_matrix() -> None:
     networks = parse_networks(["192.168.0.0/16", "10.0.0.0/8"])
     assert address_allowed("192.168.1.50", networks) is True

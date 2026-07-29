@@ -27,7 +27,7 @@ from .config import AgentConfig
 from .logging_setup import get_logger
 from .sampler import TelemetrySource
 from .schema import telemetry_schema
-from .security import Authenticator
+from .security import Authenticator, auth_dependency
 
 _log = get_logger("api")
 
@@ -37,7 +37,7 @@ _POLL_SECONDS = 1.0
 
 
 def create_app(config: AgentConfig, sampler: TelemetrySource) -> FastAPI:
-    auth = Authenticator(config)
+    guard = auth_dependency(config)
     app = FastAPI(
         title="FleetPanel agent",
         version=AGENT_VERSION,
@@ -63,9 +63,10 @@ def create_app(config: AgentConfig, sampler: TelemetrySource) -> FastAPI:
 
     app.state.config = config
     app.state.sampler = sampler
-    app.state.authenticator = auth
+    # Kept for introspection and tests; the routes use `guard`, not this.
+    app.state.authenticator = Authenticator(config)
 
-    protected = [Depends(auth)]
+    protected = [Depends(guard)]
 
     # ------------------------------------------------------------------ public
 
