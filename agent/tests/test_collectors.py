@@ -22,7 +22,9 @@ from fleetpanel_agent.collectors.memory import MemoryCollector
 from fleetpanel_agent.collectors.network import (
     NetworkCollector,
     compute_rate,
+    is_advertisable,
     is_physical,
+    order_addresses,
     parse_proc_net_route,
     sum_counters,
 )
@@ -320,6 +322,93 @@ def test_compute_rate_zero_elapsed() -> None:
 )
 def test_physical_interface_classification(name: str, expected: bool) -> None:
     assert is_physical(name) is expected
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["vEthernet (WSL)", "VMware Network Adapter VMnet1", "VirtualBox Host-Only Network",
+     "Loopback Pseudo-Interface 1", "Bluetooth Network Connection", "Tailscale"],
+)
+def test_windows_virtual_adapters_are_not_physical(name: str) -> None:
+    """Windows names virtual adapters descriptively, not with a short prefix."""
+    assert is_physical(name) is False
+
+
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        ("192.168.1.50", True),
+        ("10.0.0.4", True),
+        ("172.25.208.1", True),
+        ("169.254.14.14", False),  # APIPA: DHCP failed, nothing can reach us there
+        ("127.0.0.1", False),
+        ("0.0.0.0", False),  # noqa: S104 - test data, not a bind address
+        ("", False),
+    ],
+)
+def test_advertisable_addresses(address: str, expected: bool) -> None:
+    assert is_advertisable(address) is expected
+
+
+def test_order_addresses_promotes_the_source_address() -> None:
+    addresses = ["172.25.208.1", "192.168.1.50", "10.5.0.2"]
+    assert order_addresses(addresses, "192.168.1.50")[0] == "192.168.1.50"
+    # Unknown or absent source: order is left alone rather than guessed at.
+    assert order_addresses(addresses, None) == addresses
+    assert order_addresses(addresses, "8.8.8.8") == addresses
+
+
+def test_ipv4_addresses_ranks_reachable_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: a panel took the first advertised address and got an unreachable one.
+
+    On a host with WSL/Hyper-V and a failed DHCP lease, the raw psutil order put a
+    169.254 link-local address and a virtual adapter ahead of the real LAN address,
+    so mDNS advertised a URL nothing could connect to.
+    """
+
+    class Addr(NamedTuple):
+        family: int
+        address: str
+
+    import socket as socket_mod
+
+    monkeypatch.setattr(
+        net_mod.psutil,
+        "net_if_addrs",
+        lambda: {
+            "vEthernet (WSL)": [Addr(socket_mod.AF_INET, "172.25.208.1")],
+            "Wi-Fi 2": [Addr(socket_mod.AF_INET, "169.254.103.242")],
+            "Ethernet": [Addr(socket_mod.AF_INET, "192.168.1.2")],
+            "Loopback Pseudo-Interface 1": [Addr(socket_mod.AF_INET, "127.0.0.1")],
+        },
+    )
+    monkeypatch.setattr(net_mod, "source_ipv4", lambda: "192.168.1.2")
+
+    result = net_mod.ipv4_addresses()
+    assert result[0] == "192.168.1.2", "the routable address must be advertised first"
+    assert "169.254.103.242" not in result, "link-local must never be advertised"
+    assert "127.0.0.1" not in result
+    assert "172.25.208.1" in result  # kept, but ranked after the physical adapter
+
+
+def test_ipv4_addresses_keeps_a_virtual_only_host_discoverable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A host whose only uplink is a bridge must still advertise something."""
+
+    class Addr(NamedTuple):
+        family: int
+        address: str
+
+    import socket as socket_mod
+
+    monkeypatch.setattr(
+        net_mod.psutil,
+        "net_if_addrs",
+        lambda: {"docker0": [Addr(socket_mod.AF_INET, "172.17.0.1")]},
+    )
+    monkeypatch.setattr(net_mod, "source_ipv4", lambda: None)
+    assert net_mod.ipv4_addresses() == ["172.17.0.1"]
 
 
 def test_counter_sum_excludes_virtual_interfaces() -> None:

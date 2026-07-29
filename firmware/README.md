@@ -22,7 +22,7 @@ cd ../web && npm install && npm run build
 Over the air, once a password is set:
 
 ```bash
-pio run -e cyd-ota -t upload --upload-port wikistats.local --upload-flags --auth=YOURPASSWORD
+pio run -e cyd-ota -t upload --upload-port wikistats-XXXX.local --upload-flags --auth=YOURPASSWORD
 ```
 
 ## Layout
@@ -134,7 +134,7 @@ Every log line goes to USB serial, a 6 KiB ring buffer, and TCP port 23 once Wi-
 is up:
 
 ```bash
-nc wikistats.local 23
+nc wikistats-XXXX.local 23
 ```
 
 Output only — anything typed at it is read and discarded, so it can never become a

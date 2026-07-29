@@ -114,7 +114,7 @@ rather they appear straight away.
 ## Panel discoverability
 
 The panel advertises itself as `_http._tcp` with `product` and `version` TXT
-records, so `http://wikistats.local/` works from a browser. It never advertises
+records, so `http://wikistats-XXXX.local/` works from a browser. It never advertises
 `_fleetpanel._tcp` — it is a consumer of that service, never a provider.
 
 ## When discovery does not work

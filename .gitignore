@@ -28,6 +28,11 @@ web/.vite/
 # would mean two sources of truth for the same bytes.
 firmware/data/www/
 
+# A seeded configuration used to provision a panel over USB. It contains real
+# Wi-Fi passwords and the admin password hash, so it must never be committed.
+firmware/data/config.json
+firmware/data/config.bak
+
 # ---- Editors / OS ----
 .vscode/
 .idea/

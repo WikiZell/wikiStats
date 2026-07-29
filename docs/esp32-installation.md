@@ -104,8 +104,13 @@ Saved passwords are never shown again, on either interface.
 
 ## Everyday access
 
-Once on your network: `http://wikistats.local/` (or the IP shown on the
-diagnostics screen). The hostname is configurable.
+Once on your network: `http://wikistats-XXXX.local/`, where `XXXX` is the last four
+hex digits of the chip ID. The exact name is on the diagnostics screen, in the boot
+log, and in `GET /api/status` as `wifi.hostname`. It is derived from the chip so two
+panels on one network do not collide, and it is editable on the Display page.
+
+If mDNS does not resolve (common on Windows without Bonjour, and on networks that
+block multicast), use the IP address shown on the diagnostics screen.
 
 ## Adding devices
 
@@ -135,19 +140,37 @@ scrolling a list never flips the page.
 Set an administrator password first (OTA refuses to start without one — an
 unauthenticated OTA listener on a LAN is remote code execution).
 
+The password goes in an environment variable, not on the command line —
+`--upload-flags` is not a `pio run` option:
+
 ```bash
-pio run -e cyd-ota -t upload --upload-port wikistats.local --upload-flags --auth=YOURPASSWORD
+PLATFORMIO_UPLOAD_FLAGS=--auth=YOURPASSWORD pio run -e cyd-ota -t upload --upload-port wikistats-XXXX.local
 ```
 
-Or drag `firmware.bin` onto the web interface's *Firmware update* page. Both write
-the inactive OTA slot and only switch over after a successful verify.
+On Windows PowerShell:
+
+```bash
+$env:PLATFORMIO_UPLOAD_FLAGS="--auth=YOURPASSWORD"; pio run -e cyd-ota -t upload --upload-port wikistats-XXXX.local
+```
+
+**If it prints `Authenticating...OK` and then `No response from device`**, the panel
+authenticated fine and then could not open its connection *back* to your machine.
+That is a host firewall blocking inbound TCP to python, not a device fault. Either
+allow it, or use the web uploader instead.
+
+**Web uploader** — *Firmware update* page, choose `.pio/build/cyd/firmware.bin`,
+upload. It only makes outbound connections from your browser, so no firewall rule is
+needed. Measured at roughly 16 s for a 1.7 MB image over 2.4 GHz Wi-Fi.
+
+Both paths write the inactive OTA slot and only switch over after a successful
+verify.
 
 ## Remote serial console
 
 Once on Wi-Fi the panel mirrors every log line to TCP port 23:
 
 ```bash
-nc wikistats.local 23
+nc wikistats-XXXX.local 23
 ```
 
 It is output-only — anything typed is discarded, so it can never become a command

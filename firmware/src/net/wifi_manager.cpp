@@ -63,6 +63,10 @@ void WifiManager::begin() {
     nextAttemptMs_ = 0;
     snprintf(message_, sizeof(message_), "%u saved network%s", (unsigned)saved,
              saved == 1 ? "" : "s");
+    // One scan at startup so the log shows what is actually in range. Costs a
+    // couple of seconds before the first join attempt and pays for itself the
+    // first time a saved SSID turns out to be misspelled.
+    requestScan();
 }
 
 void WifiManager::startPortal(const char* reason) {
@@ -379,6 +383,16 @@ void WifiManager::loop(uint32_t nowMs) {
             scanRunning_ = false;
             scanReady_ = true;
             LOG_I(kTag, "scan found %u networks", (unsigned)scanResults_.size());
+            if (WiFi.status() != WL_CONNECTED) {
+                // Only while unconnected, and only at INFO: on a panel with no
+                // keyboard this list is often the only way to find out that the
+                // SSID is spelled differently than expected.
+                for (const ScanEntry& entry : scanResults_) {
+                    LOG_I(kTag, "  visible: \"%s\" %d dBm ch%u %s%s", entry.ssid.c_str(),
+                          (int)entry.rssi, entry.channel, entry.secure ? "secured" : "open",
+                          entry.known ? " [saved]" : "");
+                }
+            }
         } else if (found == WIFI_SCAN_FAILED) {
             scanRunning_ = false;
             scanReady_ = true;

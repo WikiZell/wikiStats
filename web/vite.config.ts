@@ -34,7 +34,7 @@ export default defineConfig({
     proxy: {
       // `npm run dev` against a real panel: point at its address.
       "/api": {
-        target: process.env.WIKISTATS_PANEL ?? "http://wikistats.local",
+        target: process.env.WIKISTATS_PANEL ?? "http://wikistats-XXXX.local",
         changeOrigin: true,
       },
     },

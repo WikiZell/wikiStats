@@ -31,7 +31,7 @@ flowchart LR
     NET <--> |"AppState<br/>mutex + revision"| UI
     WEB <--> |"same AppState"| UI
     WEB <--> FS
-    U1 -- "http://wikistats.local" --> WEB
+    U1 -- "http://wikistats-XXXX.local" --> WEB
 ```
 
 Two independent halves that share one document format:

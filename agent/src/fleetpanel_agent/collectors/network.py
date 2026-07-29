@@ -47,6 +47,21 @@ VIRTUAL_PREFIXES: tuple[str, ...] = (
     "dummy",
 )
 
+# Windows names its virtual adapters descriptively rather than with a short prefix
+# ("vEthernet (WSL)", "VMware Network Adapter VMnet1"), so those are matched
+# anywhere in the name rather than only at the start.
+VIRTUAL_SUBSTRINGS: tuple[str, ...] = (
+    "vethernet",
+    "virtualbox",
+    "vmware",
+    "hyper-v",
+    "loopback",
+    "bluetooth",
+    "wsl",
+    "tailscale",
+    "zerotier",
+)
+
 
 class Counters(NamedTuple):
     rx: int
@@ -57,6 +72,8 @@ def is_physical(name: str) -> bool:
     """True for interfaces whose byte counters should feed the aggregate."""
     lowered = name.lower()
     if lowered == "lo" or lowered.startswith("lo:"):
+        return False
+    if any(fragment in lowered for fragment in VIRTUAL_SUBSTRINGS):
         return False
     return not any(lowered.startswith(prefix) for prefix in VIRTUAL_PREFIXES)
 
@@ -120,8 +137,8 @@ def parse_proc_net_route(lines: list[str]) -> str | None:
     return best_iface
 
 
-def primary_interface_via_socket() -> str | None:
-    """Fallback: find the interface holding the address the kernel would source from.
+def source_ipv4() -> str | None:
+    """The address the kernel would source from when talking to the outside world.
 
     Opening a UDP socket to a routable address sends no packets; it only makes the
     kernel run its route lookup, which works on every platform including Windows.
@@ -130,8 +147,16 @@ def primary_interface_via_socket() -> str | None:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.settimeout(0.2)
             sock.connect(("192.0.2.1", 9))  # TEST-NET-1, guaranteed unrouted
-            local_ip = sock.getsockname()[0]
+            address: str = sock.getsockname()[0]
     except OSError:
+        return None
+    return address or None
+
+
+def primary_interface_via_socket() -> str | None:
+    """Fallback for the default-route interface, resolved from the source address."""
+    local_ip = source_ipv4()
+    if local_ip is None:
         return None
     try:
         for name, addrs in psutil.net_if_addrs().items():
@@ -143,22 +168,53 @@ def primary_interface_via_socket() -> str | None:
     return None
 
 
+def is_advertisable(address: str) -> bool:
+    """Whether an address is worth telling a panel about.
+
+    Link-local (169.254/16) means DHCP failed on that interface; nothing can reach
+    the agent there. Advertising it is worse than saying nothing, because a panel
+    that picks it up records an address that will never work.
+    """
+    if not address:
+        return False
+    if address.startswith("127.") or address.startswith("169.254."):
+        return False
+    return address != "0.0.0.0"  # noqa: S104 - comparison, not a bind
+
+
 def ipv4_addresses() -> list[str]:
-    out: list[str] = []
+    """Reachable IPv4 addresses, most useful first.
+
+    Order matters: mDNS records and the MQTT `meta` document are consumed by clients
+    that simply take the first entry. On a developer machine with Docker, WSL or
+    Hyper-V installed, an unordered list routinely starts with a virtual adapter's
+    address that nothing outside the host can reach.
+    """
+    physical: list[str] = []
+    other: list[str] = []
     try:
         for name, addrs in psutil.net_if_addrs().items():
-            if name.lower() == "lo":
-                continue
             for addr in addrs:
-                if addr.family != socket.AF_INET:
+                if addr.family != socket.AF_INET or not is_advertisable(addr.address):
                     continue
-                if not addr.address or addr.address.startswith("127."):
-                    continue
-                if addr.address not in out:
-                    out.append(addr.address)
+                # Virtual adapters are kept, but ranked last: on a host with a
+                # bridge as its only uplink, dropping them entirely would leave the
+                # agent undiscoverable.
+                bucket = physical if is_physical(name) else other
+                if addr.address not in bucket:
+                    bucket.append(addr.address)
     except Exception:  # noqa: BLE001
         log_throttled(_log, logging.WARNING, "net.addrs", "net_if_addrs failed")
-    return out
+
+    ordered = physical + [item for item in other if item not in physical]
+    return order_addresses(ordered, source_ipv4())
+
+
+def order_addresses(addresses: list[str], preferred: str | None) -> list[str]:
+    """Move the default-route source address to the front. Pure; unit tested."""
+    if preferred is None or preferred not in addresses:
+        return addresses
+    return [preferred] + [item for item in addresses if item != preferred]
 
 
 class NetworkCollector:

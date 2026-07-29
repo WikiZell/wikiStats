@@ -26,7 +26,7 @@ flowchart LR
     P --> B
     S --> B
     B -->|subscribe| C
-    Br -->|"http://wikistats.local"| C
+    Br -->|"http://wikistats-XXXX.local"| C
 ```
 
 ## What you get
@@ -263,17 +263,21 @@ npm run build
 ## Debugging a panel that is already on the wall
 
 ```bash
-nc wikistats.local 23
+nc wikistats-XXXX.local 23
 ```
 
 Every log line also goes to TCP port 23 and to `GET /api/logs`. It is output-only:
 anything typed at it is discarded, so it can never become a command channel.
 
-Firmware updates over the air:
+Firmware updates over the air (the password goes in an environment variable —
+`--upload-flags` is not a `pio run` option):
 
 ```bash
-pio run -e cyd-ota -t upload --upload-port wikistats.local --upload-flags --auth=YOURPASSWORD
+PLATFORMIO_UPLOAD_FLAGS=--auth=YOURPASSWORD pio run -e cyd-ota -t upload --upload-port wikistats-XXXX.local
 ```
+
+Or upload `firmware.bin` from the web interface's *Firmware update* page, which
+needs no inbound firewall rule.
 
 ## Security, honestly
 

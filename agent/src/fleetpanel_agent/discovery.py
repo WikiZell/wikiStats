@@ -51,12 +51,24 @@ def instance_name(display_name: str, device_id: str) -> str:
     return f"{safe[:40]}-{device_id[:8]}.{MDNS_SERVICE_TYPE}"
 
 
-def local_addresses() -> list[bytes]:
-    """Packed IPv4 addresses for the ServiceInfo record."""
+def local_addresses(all_addresses: bool = False) -> list[bytes]:
+    """Packed IPv4 address(es) for the ServiceInfo record.
+
+    Only the primary address is advertised by default, and that is deliberate.
+    A DNS-SD service with several A records lets every resolver pick a different
+    one, and they do: on a host with Docker or WSL installed, an ESP32 resolving
+    three services from the same machine happily returned the LAN address for one
+    and a virtual adapter's address for the others, leaving two devices permanently
+    "connection refused". One record means one answer.
+    """
     from .collectors.network import ipv4_addresses
 
+    addresses = ipv4_addresses()
+    if not all_addresses:
+        addresses = addresses[:1]
+
     packed: list[bytes] = []
-    for address in ipv4_addresses():
+    for address in addresses:
         try:
             packed.append(socket.inet_aton(address))
         except OSError:

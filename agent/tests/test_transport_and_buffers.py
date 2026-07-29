@@ -64,6 +64,36 @@ def test_advertiser_describe_without_starting_the_stack() -> None:
     assert described["txt"]["id"] == "f6a3f749c2dd"
 
 
+def test_mdns_advertises_a_single_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: several A records let each resolver pick a different one.
+
+    An ESP32 resolving three services from one Docker/WSL host returned the LAN
+    address for one and a virtual adapter's address for the others.
+    """
+    from fleetpanel_agent import discovery as discovery_mod
+    from fleetpanel_agent.collectors import network as network_mod
+
+    monkeypatch.setattr(
+        network_mod, "ipv4_addresses", lambda: ["192.168.1.2", "172.25.208.1", "10.0.0.5"]
+    )
+    packed = discovery_mod.local_addresses()
+    assert len(packed) == 1
+    assert packed[0] == bytes([192, 168, 1, 2])
+
+    # The full list stays available for callers that genuinely want it.
+    assert len(discovery_mod.local_addresses(all_addresses=True)) == 3
+
+
+def test_mdns_address_list_survives_a_host_with_no_usable_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleetpanel_agent import discovery as discovery_mod
+    from fleetpanel_agent.collectors import network as network_mod
+
+    monkeypatch.setattr(network_mod, "ipv4_addresses", lambda: [])
+    assert discovery_mod.local_addresses() == []
+
+
 def test_advertiser_start_is_a_noop_when_disabled() -> None:
     config = parse_config({"discovery": {"enabled": False}})
     advertiser = DiscoveryAdvertiser(config, "id", "name")

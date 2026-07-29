@@ -4,6 +4,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include <string>
+
 #include "../app_state.h"
 #include "../log.h"
 #include "ota_service.h"
@@ -360,10 +362,15 @@ void networkTask(void*) {
 
         app::state().flushPendingSave(millis());
 
-        if (g_mqtt.connected() && (millis() - g_mqtt.lastSampleMs()) < 15000) {
-            g_activeTransport = "mqtt";
-        } else if (!online) {
+        if (!online) {
             g_activeTransport = "offline";
+        } else if (g_mqtt.connected() && (millis() - g_mqtt.lastSampleMs()) < 15000) {
+            g_activeTransport = "mqtt";
+        } else if (g_activeTransport == std::string("offline") ||
+                   g_activeTransport == std::string("none")) {
+            // Online but nothing has delivered a sample yet. Reporting "offline"
+            // here was misleading: the panel is up, it simply has no data source.
+            g_activeTransport = "idle";
         }
 
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(kTickMs));

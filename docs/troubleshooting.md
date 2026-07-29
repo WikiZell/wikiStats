@@ -159,7 +159,7 @@ LED turns amber) the setup portal starts and **all settings are preserved**.
 curl -s http://<agent-ip>:8770/api/v1/health
 ```
 
-Then check the panel's log (System information page, or `nc wikistats.local 23`):
+Then check the panel's log (System information page, or `nc wikistats-XXXX.local 23`):
 
 | Log line | Cause |
 | -------- | ----- |
@@ -212,7 +212,7 @@ LVGL font from `lv_conf.h`, disable unused widgets, or keep `CORE_DEBUG_LEVEL=0`
 
 ### Web interface will not load
 
-* `http://wikistats.local/` fails → try the IP from the diagnostics screen; mDNS
+* `http://wikistats-XXXX.local/` fails → try the IP from the diagnostics screen; mDNS
   resolution from Windows needs Bonjour.
 * Blank page → the LittleFS image was never uploaded:
   `pio run -e cyd -t uploadfs`.
@@ -228,8 +228,8 @@ sudo journalctl -u fleetpanel-agent -n 200 --no-pager
 curl -s http://127.0.0.1:8770/api/v1/info
 
 # panel
-nc wikistats.local 23
-curl -s http://wikistats.local/api/status
+nc wikistats-XXXX.local 23
+curl -s http://wikistats-XXXX.local/api/status
 ```
 
 Neither output contains a password or a token.

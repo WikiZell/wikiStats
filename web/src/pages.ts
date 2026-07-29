@@ -39,6 +39,14 @@ function meter(value: number | undefined, warn: number, crit: number): HTMLEleme
   );
 }
 
+// Rendered with the panel's own hostname so it can be pasted without editing.
+function otaCommand(hostname = window.location.host): string {
+    return (
+        `PLATFORMIO_UPLOAD_FLAGS=--auth=YOURPASSWORD \\\n` +
+        `  pio run -e cyd-ota -t upload --upload-port ${hostname}`
+    );
+}
+
 async function saveConfig(patch: Partial<PanelConfig>, what: string): Promise<void> {
   try {
     await api.saveConfig(patch);
@@ -1058,9 +1066,15 @@ const firmware: PageDefinition = {
       ),
       card(
         "Over the air from PlatformIO",
-        null,
-        h("p", {}, "With OTA enabled on the Security page:"),
-        h("pre", { class: "log" }, "pio run -e cyd-ota -t upload --upload-port wikistats.local"),
+        "The password goes in an environment variable - --upload-flags is not a pio run option.",
+        h("pre", { class: "log" }, otaCommand()),
+        h(
+          "p",
+          { class: "hint" },
+          "espota needs the panel to connect back to your machine on an ephemeral port. " +
+            "If it prints \"Authenticating...OK\" then \"No response from device\", a host " +
+            "firewall is blocking that; use the uploader above instead.",
+        ),
       ),
     ]);
   },
