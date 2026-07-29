@@ -138,13 +138,37 @@ if [ "$PYTHON_MINOR" -lt 11 ]; then
     info "no stdlib tomllib on this interpreter; the tomli backport will be installed"
 fi
 
-if ! "$PYTHON" -c 'import venv' >/dev/null 2>&1; then
-    die "the venv module is missing. Install it with: apt install python3-venv"
-fi
-# ensurepip is a separate package on Debian derivatives and its absence produces a
-# baffling failure several steps later.
-if ! "$PYTHON" -c 'import ensurepip' >/dev/null 2>&1; then
-    die "ensurepip is missing. Install it with: apt install python3-venv"
+# Debian and Ubuntu split venv and ensurepip out of the python3 package, and their
+# absence otherwise surfaces several steps later as something baffling. Offer to
+# install them rather than just naming the command: this is a prerequisite of what
+# the user already asked for, not a separate decision.
+venv_ready() {
+    "$PYTHON" -c 'import ensurepip, venv' >/dev/null 2>&1
+}
+
+if ! venv_ready; then
+    py_ver="$("$PYTHON" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
+    warn "python venv/ensurepip is missing (Debian and Ubuntu ship them separately)"
+
+    if command -v apt-get >/dev/null 2>&1; then
+        reply="$(ask "Install python${py_ver}-venv with apt now? [Y/n]" 'y')"
+        case "$reply" in
+            [nN]*)
+                die "cannot continue without venv. Install it with: apt install python${py_ver}-venv"
+                ;;
+        esac
+        info "installing python${py_ver}-venv"
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq || warn "apt-get update failed; trying the install anyway"
+        # The versioned package is the one that actually carries ensurepip for this
+        # interpreter; python3-venv is a metapackage that may point elsewhere.
+        apt-get install -y -qq "python${py_ver}-venv" \
+            || apt-get install -y -qq python3-venv \
+            || die "could not install python${py_ver}-venv; install it manually and re-run"
+    fi
+
+    venv_ready || die "venv is still unavailable after installing python${py_ver}-venv"
+    info "venv is now available"
 fi
 
 # ------------------------------------------------------------ bootstrap
