@@ -1,0 +1,27 @@
+# Shell scripts and the systemd unit must keep LF endings whatever the checkout
+# platform does. A CRLF in install.sh produces `bash\r: No such file or directory`,
+# which is a confusing way to fail an installation.
+*.sh            text eol=lf
+*.service       text eol=lf
+*.csv           text eol=lf
+
+# Normalise everything else in the repository, and mark what must not be touched.
+*.md            text
+*.json          text
+*.toml          text
+*.yml           text
+*.yaml          text
+*.py            text
+*.ts            text
+*.js            text
+*.mjs           text
+*.css           text
+*.html          text
+*.c             text
+*.h             text
+*.cpp           text
+*.ini           text
+
+*.bin           binary
+*.gz            binary
+*.png           binary

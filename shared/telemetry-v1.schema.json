@@ -1,0 +1,337 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fleetpanel.local/schemas/telemetry-v1.schema.json",
+  "title": "fleetpanel.telemetry.v1",
+  "description": "FleetPanel / WikiStats cross-platform telemetry envelope, version 1. Every agent (Linux, Raspberry Pi, and future Windows/macOS agents) MUST emit exactly these field names, types, units and nesting. Values that cannot be determined MUST be present and set to null rather than omitted. Consumers MUST ignore unknown properties so that additive v1.x changes never break older firmware.",
+  "type": "object",
+  "required": [
+    "schema",
+    "timestamp",
+    "sequence",
+    "device",
+    "status",
+    "cpu",
+    "memory",
+    "storage",
+    "network",
+    "optional",
+    "capabilities"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema": {
+      "description": "Protocol discriminator. Consumers must accept any value beginning with 'fleetpanel.telemetry.v1'.",
+      "type": "string",
+      "const": "fleetpanel.telemetry.v1"
+    },
+    "timestamp": {
+      "description": "Sample time, UTC ISO 8601 with a trailing Z and second resolution.",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "sequence": {
+      "description": "Monotonically increasing sample counter, reset to 0 on agent start.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "device": { "$ref": "#/$defs/device" },
+    "status": { "$ref": "#/$defs/status" },
+    "cpu": { "$ref": "#/$defs/cpu" },
+    "memory": { "$ref": "#/$defs/memory" },
+    "storage": { "$ref": "#/$defs/storage" },
+    "network": { "$ref": "#/$defs/network" },
+    "optional": { "$ref": "#/$defs/optional" },
+    "capabilities": {
+      "description": "Subsystems that produced usable data in this sample. A capability MUST be absent when its data is null.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "cpu",
+          "cpu_temperature",
+          "cpu_frequency",
+          "load_average",
+          "memory",
+          "swap",
+          "storage",
+          "network",
+          "gpu",
+          "battery",
+          "processes",
+          "sessions"
+        ]
+      },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "percent": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "bytes": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "bytes_per_second": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "celsius": {
+      "type": ["number", "null"],
+      "minimum": -273.15,
+      "maximum": 500
+    },
+    "iso_utc": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "device": {
+      "type": "object",
+      "description": "Stable identity of the monitored machine.",
+      "required": [
+        "id",
+        "name",
+        "hostname",
+        "platform",
+        "os_name",
+        "os_version",
+        "kernel",
+        "architecture",
+        "hardware_model",
+        "agent_version"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "description": "Stable, non-reversible device identifier. Derived from the machine ID and truncated. Never contains the raw machine ID.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{8,32}$"
+        },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "hostname": { "type": "string", "minLength": 1, "maxLength": 253 },
+        "platform": {
+          "description": "Operating-system family. Reserved values allow future agents without firmware changes.",
+          "type": "string",
+          "enum": ["linux", "windows", "macos", "freebsd", "other"]
+        },
+        "os_name": { "type": ["string", "null"] },
+        "os_version": { "type": ["string", "null"] },
+        "kernel": { "type": ["string", "null"] },
+        "architecture": { "type": ["string", "null"] },
+        "hardware_model": { "type": ["string", "null"] },
+        "agent_version": { "type": "string" }
+      }
+    },
+    "status": {
+      "type": "object",
+      "required": [
+        "state",
+        "uptime_seconds",
+        "boot_time",
+        "process_count",
+        "logged_in_users"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "state": {
+          "description": "Self-reported agent state. Staleness/offline is decided by the consumer from timestamp age, not from this field.",
+          "type": "string",
+          "enum": ["online", "degraded"]
+        },
+        "uptime_seconds": { "type": ["integer", "null"], "minimum": 0 },
+        "boot_time": { "$ref": "#/$defs/iso_utc" },
+        "process_count": { "type": ["integer", "null"], "minimum": 0 },
+        "logged_in_users": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "cpu": {
+      "type": "object",
+      "required": [
+        "usage_percent",
+        "per_core_percent",
+        "physical_cores",
+        "logical_cores",
+        "frequency_mhz",
+        "load_1",
+        "load_5",
+        "load_15",
+        "temperature_c",
+        "temperatures"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "usage_percent": { "$ref": "#/$defs/percent" },
+        "per_core_percent": {
+          "type": ["array", "null"],
+          "items": { "type": "number", "minimum": 0, "maximum": 100 }
+        },
+        "physical_cores": { "type": ["integer", "null"], "minimum": 1 },
+        "logical_cores": { "type": ["integer", "null"], "minimum": 1 },
+        "frequency_mhz": { "type": ["number", "null"], "minimum": 0 },
+        "load_1": { "type": ["number", "null"], "minimum": 0 },
+        "load_5": { "type": ["number", "null"], "minimum": 0 },
+        "load_15": { "type": ["number", "null"], "minimum": 0 },
+        "temperature_c": { "$ref": "#/$defs/celsius" },
+        "temperatures": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "required": ["label", "temperature_c", "high_c", "critical_c"],
+            "additionalProperties": true,
+            "properties": {
+              "label": { "type": "string" },
+              "temperature_c": { "$ref": "#/$defs/celsius" },
+              "high_c": { "$ref": "#/$defs/celsius" },
+              "critical_c": { "$ref": "#/$defs/celsius" }
+            }
+          }
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "required": [
+        "total_bytes",
+        "available_bytes",
+        "used_bytes",
+        "free_bytes",
+        "usage_percent",
+        "swap_total_bytes",
+        "swap_used_bytes",
+        "swap_free_bytes",
+        "swap_usage_percent"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "total_bytes": { "$ref": "#/$defs/bytes" },
+        "available_bytes": { "$ref": "#/$defs/bytes" },
+        "used_bytes": { "$ref": "#/$defs/bytes" },
+        "free_bytes": { "$ref": "#/$defs/bytes" },
+        "usage_percent": { "$ref": "#/$defs/percent" },
+        "swap_total_bytes": { "$ref": "#/$defs/bytes" },
+        "swap_used_bytes": { "$ref": "#/$defs/bytes" },
+        "swap_free_bytes": { "$ref": "#/$defs/bytes" },
+        "swap_usage_percent": { "$ref": "#/$defs/percent" }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "description": "Aggregate totals exclude pseudo-filesystems and bind/duplicate mounts (deduplicated by device+fsid).",
+      "required": [
+        "total_bytes",
+        "used_bytes",
+        "free_bytes",
+        "usage_percent",
+        "mounts"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "total_bytes": { "$ref": "#/$defs/bytes" },
+        "used_bytes": { "$ref": "#/$defs/bytes" },
+        "free_bytes": { "$ref": "#/$defs/bytes" },
+        "usage_percent": { "$ref": "#/$defs/percent" },
+        "mounts": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "required": [
+              "device",
+              "mountpoint",
+              "filesystem",
+              "total_bytes",
+              "used_bytes",
+              "free_bytes",
+              "usage_percent"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "device": { "type": ["string", "null"] },
+              "mountpoint": { "type": "string" },
+              "filesystem": { "type": ["string", "null"] },
+              "total_bytes": { "$ref": "#/$defs/bytes" },
+              "used_bytes": { "$ref": "#/$defs/bytes" },
+              "free_bytes": { "$ref": "#/$defs/bytes" },
+              "usage_percent": { "$ref": "#/$defs/percent" }
+            }
+          }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "required": [
+        "primary_interface",
+        "ip_addresses",
+        "rx_bytes_total",
+        "tx_bytes_total",
+        "rx_bytes_per_second",
+        "tx_bytes_per_second"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "primary_interface": { "type": ["string", "null"] },
+        "ip_addresses": {
+          "description": "Non-loopback IPv4 addresses of the host.",
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "rx_bytes_total": { "$ref": "#/$defs/bytes" },
+        "tx_bytes_total": { "$ref": "#/$defs/bytes" },
+        "rx_bytes_per_second": { "$ref": "#/$defs/bytes_per_second" },
+        "tx_bytes_per_second": { "$ref": "#/$defs/bytes_per_second" }
+      }
+    },
+    "optional": {
+      "type": "object",
+      "description": "Subsystems that many machines do not have. Always present as an object; each member is null when unsupported.",
+      "required": ["gpu", "battery"],
+      "additionalProperties": true,
+      "properties": {
+        "gpu": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": [
+                "name",
+                "usage_percent",
+                "temperature_c",
+                "memory_total_bytes",
+                "memory_used_bytes"
+              ],
+              "additionalProperties": true,
+              "properties": {
+                "name": { "type": ["string", "null"] },
+                "usage_percent": { "$ref": "#/$defs/percent" },
+                "temperature_c": { "$ref": "#/$defs/celsius" },
+                "memory_total_bytes": { "$ref": "#/$defs/bytes" },
+                "memory_used_bytes": { "$ref": "#/$defs/bytes" }
+              }
+            }
+          ]
+        },
+        "battery": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": [
+                "percent",
+                "power_plugged",
+                "seconds_remaining"
+              ],
+              "additionalProperties": true,
+              "properties": {
+                "percent": { "$ref": "#/$defs/percent" },
+                "power_plugged": { "type": ["boolean", "null"] },
+                "seconds_remaining": { "type": ["integer", "null"], "minimum": 0 }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

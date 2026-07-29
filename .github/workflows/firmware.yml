@@ -1,0 +1,110 @@
+name: Firmware
+
+on:
+  push:
+    paths: ["firmware/**", "web/**", ".github/workflows/firmware.yml"]
+  pull_request:
+    paths: ["firmware/**", "web/**", ".github/workflows/firmware.yml"]
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    name: Native unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+          key: pio-native-${{ hashFiles('firmware/platformio.ini') }}
+      - run: pip install platformio
+      # fleet_core has no Arduino headers, so the parser, formatter, threshold,
+      # gesture, carousel, dedup and migration logic all run here - on every push,
+      # with no board attached.
+      - run: pio test -e native
+        working-directory: firmware
+
+  build:
+    name: Build for ESP32-2432S028R
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-cyd-${{ hashFiles('firmware/platformio.ini') }}
+      - run: pip install platformio
+
+      # The web bundle has to exist before the filesystem image is built, and the
+      # pack script fails the job if it would not fit the 256 KiB partition.
+      - run: npm install --no-audit --no-fund
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+      - run: pio run -e cyd
+        working-directory: firmware
+      - run: pio run -e cyd -t buildfs
+        working-directory: firmware
+
+      - name: Report sizes
+        working-directory: firmware
+        run: |
+          echo "### Firmware size" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          pio run -e cyd 2>&1 | grep -E "^(RAM|Flash):" >> "$GITHUB_STEP_SUMMARY"
+          ls -l .pio/build/cyd/firmware.bin .pio/build/cyd/littlefs.bin >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wikistats-firmware
+          path: |
+            firmware/.pio/build/cyd/firmware.bin
+            firmware/.pio/build/cyd/littlefs.bin
+            firmware/.pio/build/cyd/bootloader.bin
+            firmware/.pio/build/cyd/partitions.bin
+          if-no-files-found: error
+
+  web:
+    name: Web interface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package.json
+      - run: npm install --no-audit --no-fund
+        working-directory: web
+      - run: npm run typecheck
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - name: Fail if the bundle grew past the partition budget
+        run: |
+          SIZE=$(du -sb firmware/data/www | cut -f1)
+          echo "packed bundle: $SIZE bytes"
+          if [ "$SIZE" -gt 204800 ]; then
+            echo "::error::the web bundle no longer leaves room for config.json on the 256 KiB partition"
+            exit 1
+          fi

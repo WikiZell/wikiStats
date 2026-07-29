@@ -1,0 +1,132 @@
+# FleetPanel / WikiStats agent configuration
+# Installed to /etc/fleetpanel-agent/config.toml
+#
+# Every value below is a default. An empty file is a valid configuration and
+# produces a working LAN agent on port 8770 with no authentication.
+#
+# After editing:  sudo systemctl restart fleetpanel-agent
+# To validate:    sudo -u fleetpanel /opt/fleetpanel-agent/venv/bin/fleetpanel-agent \
+#                     --config /etc/fleetpanel-agent/config.toml --check
+
+[agent]
+# Display name shown on the panel. Empty = use the hostname.
+name = ""
+
+# Stable device ID override, 8-32 lowercase hex characters.
+# Empty = derive it from the machine ID (hashed, never published raw).
+device_id = ""
+
+# Seconds between samples. The panel polls independently; this only controls how
+# fresh the served document is.
+sample_interval = 2.0
+
+# Seconds of samples kept in the in-memory ring buffer for GET /api/v1/history.
+# 0 disables history. Memory use is bounded and constant.
+history_seconds = 900
+
+[http]
+enabled = true
+host = "0.0.0.0"
+port = 8770
+
+# "none"   - no authentication (default; intended for a trusted LAN)
+# "bearer" - require  Authorization: Bearer <api_token>
+# "query"  - accept the header OR ?token=<api_token> for constrained embedded
+#            clients. Query strings appear in proxy logs, so this is opt-in.
+auth_mode = "none"
+
+# Required when auth_mode is "bearer" or "query". Minimum 16 characters.
+# Generate one with:  openssl rand -hex 24
+api_token = ""
+
+# When non-empty, only clients inside these CIDRs are answered at all.
+# trusted_networks = ["192.168.0.0/16", "10.0.0.0/8"]
+trusted_networks = []
+
+# Browser origins allowed to call the API. Leave empty unless you are building a
+# web dashboard against this agent.
+cors_origins = []
+
+# Serve the interactive OpenAPI docs at /docs.
+enable_docs = true
+
+[storage]
+# Explicit allow-list of mountpoints. Empty = every real filesystem, with
+# pseudo-filesystems and duplicate/bind mounts filtered out automatically.
+# include = ["/", "/mnt/data"]
+include = []
+
+# Mountpoints (and their subtrees) to drop even when they look real.
+# exclude = ["/mnt/backup"]
+exclude = []
+
+# Include tmpfs, overlayfs, squashfs and friends. Almost never wanted; it makes
+# aggregate totals meaningless on container hosts.
+include_pseudo = false
+
+# Filesystems smaller than this are skipped (EFI system partitions, /boot).
+# "/" is never skipped.
+min_total_bytes = 67108864
+
+[temperature]
+enabled = true
+use_psutil = true
+use_sysfs = true
+
+# Raspberry Pi SoC temperature via the VideoCore firmware. Harmless elsewhere:
+# the binary simply does not exist.
+use_vcgencmd = true
+vcgencmd_path = "/usr/bin/vcgencmd"
+
+# Parse `sensors -j` from lm-sensors. Off by default because it forks a process
+# on every sample; enable only if psutil and sysfs both come up empty.
+use_sensors_json = false
+sensors_path = "/usr/bin/sensors"
+
+# Label priority for choosing the single "CPU temperature" the panel shows.
+# First match wins; within one priority the hottest reading wins.
+preferred_labels = [
+  "coretemp",
+  "k10temp",
+  "cpu_thermal",
+  "soc_thermal",
+  "package",
+  "tctl",
+  "cpu-thermal",
+  "x86_pkg_temp",
+  "cpu",
+]
+
+[discovery]
+# Advertise _fleetpanel._tcp.local. so the panel finds this machine by itself.
+enabled = true
+
+# mDNS instance name. Empty = use the display name.
+service_name = ""
+
+[mqtt]
+# Entirely optional. REST works with no broker present.
+enabled = false
+host = ""
+port = 1883
+username = ""
+password = ""
+
+tls = false
+# tls_ca_file = "/etc/ssl/certs/my-broker-ca.pem"
+tls_ca_file = ""
+tls_insecure = false
+
+base_topic = "fleetpanel/v1"
+telemetry_qos = 0
+telemetry_retain = true
+keepalive = 30
+max_backoff_seconds = 60.0
+
+[logging]
+# DEBUG | INFO | WARNING | ERROR | CRITICAL
+level = "INFO"
+# "text" for journald, "json" for structured log shipping.
+format = "text"
+# Repeated sensor failures are collapsed to one line per this many seconds.
+throttle_seconds = 300.0

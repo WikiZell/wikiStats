@@ -1,0 +1,14 @@
+{
+  "name": "fleet_core",
+  "version": "0.1.0",
+  "description": "Platform-independent core of the WikiStats panel: telemetry parsing, unit formatting, threshold evaluation, gesture and carousel timing, device registry and configuration migration. Contains no Arduino headers so it can be unit tested on a host with `pio test -e native`.",
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*",
+  "dependencies": [
+    { "name": "ArduinoJson", "owner": "bblanchon", "version": "7.2.1" }
+  ],
+  "build": {
+    "flags": ["-std=gnu++17"]
+  }
+}

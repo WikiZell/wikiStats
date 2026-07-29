@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fleetpanel.local/schemas/configuration-v1.schema.json",
+  "title": "fleetpanel.config.v1",
+  "description": "Persisted configuration document for the WikiStats ESP32 panel. Stored atomically on LittleFS as /config.json. This is also the document produced by 'Backup' and accepted by 'Restore'. Secrets (Wi-Fi passwords, MQTT password, per-device API tokens, web password hash) are ONLY present in the on-device copy and in an explicitly requested encrypted/secret-bearing backup; the plain backup and GET /api/config replace them with null or the sentinel string \"__redacted__\".",
+  "type": "object",
+  "required": ["schema", "version"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "type": "string", "const": "fleetpanel.config.v1" },
+    "version": {
+      "description": "Configuration document revision. Firmware migrates any older version forward on load.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "panel": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "maxLength": 32 },
+        "timezone_offset_minutes": { "type": "integer", "minimum": -840, "maximum": 840 },
+        "units": { "type": "string", "enum": ["binary", "decimal"] },
+        "temperature_unit": { "type": "string", "enum": ["c", "f"] }
+      }
+    },
+    "wifi": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "hostname": { "type": "string", "maxLength": 32 },
+        "networks": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": ["ssid"],
+            "additionalProperties": true,
+            "properties": {
+              "ssid": { "type": "string", "minLength": 1, "maxLength": 32 },
+              "password": { "type": ["string", "null"], "maxLength": 64 },
+              "priority": { "type": "integer", "minimum": 0, "maximum": 255 },
+              "hidden": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "mqtt": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "host": { "type": "string", "maxLength": 64 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "username": { "type": ["string", "null"], "maxLength": 64 },
+        "password": { "type": ["string", "null"], "maxLength": 64 },
+        "tls": { "type": "boolean" },
+        "base_topic": { "type": "string", "maxLength": 48 },
+        "client_id": { "type": ["string", "null"], "maxLength": 32 }
+      }
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "mode": { "type": "string", "enum": ["http", "mqtt", "auto"] },
+        "poll_interval_ms": { "type": "integer", "minimum": 1000, "maximum": 300000 },
+        "http_timeout_ms": { "type": "integer", "minimum": 500, "maximum": 30000 },
+        "max_payload_bytes": { "type": "integer", "minimum": 1024, "maximum": 65536 },
+        "mqtt_fresh_ms": {
+          "description": "How recent an MQTT sample must be for 'auto' mode to keep preferring MQTT over HTTP.",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 600000
+        }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "mdns_enabled": { "type": "boolean" },
+        "auto_add": { "type": "boolean" },
+        "interval_s": { "type": "integer", "minimum": 10, "maximum": 3600 }
+      }
+    },
+    "display": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "brightness": { "type": "integer", "minimum": 5, "maximum": 100 },
+        "screen_timeout_s": { "type": "integer", "minimum": 0, "maximum": 3600 },
+        "dim_brightness": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "rotation": { "type": "integer", "minimum": 0, "maximum": 3 }
+      }
+    },
+    "carousel": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "interval_s": { "type": "integer", "minimum": 3, "maximum": 120 },
+        "idle_resume_s": { "type": "integer", "minimum": 0, "maximum": 3600 },
+        "wrap": { "type": "boolean" },
+        "include_offline": { "type": "boolean" }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "cpu_warn": { "type": "number", "minimum": 0, "maximum": 100 },
+        "cpu_crit": { "type": "number", "minimum": 0, "maximum": 100 },
+        "cpu_temp_warn": { "type": "number", "minimum": 0, "maximum": 150 },
+        "cpu_temp_crit": { "type": "number", "minimum": 0, "maximum": 150 },
+        "ram_warn": { "type": "number", "minimum": 0, "maximum": 100 },
+        "ram_crit": { "type": "number", "minimum": 0, "maximum": 100 },
+        "disk_warn": { "type": "number", "minimum": 0, "maximum": 100 },
+        "disk_crit": { "type": "number", "minimum": 0, "maximum": 100 },
+        "stale_s": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "offline_s": { "type": "integer", "minimum": 2, "maximum": 86400 }
+      }
+    },
+    "web": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "username": { "type": "string", "maxLength": 32 },
+        "password_hash": { "type": ["string", "null"] },
+        "password_salt": { "type": ["string", "null"] },
+        "password_set": { "type": "boolean" },
+        "session_timeout_s": { "type": "integer", "minimum": 60, "maximum": 86400 }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "level": { "type": "string", "enum": ["error", "warn", "info", "debug", "trace"] },
+        "telnet_enabled": { "type": "boolean" },
+        "telnet_port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "ota": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "arduino_ota_enabled": { "type": "boolean" },
+        "password": { "type": ["string", "null"], "maxLength": 64 }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 32 },
+          "name": { "type": "string", "maxLength": 48 },
+          "alias": { "type": ["string", "null"], "maxLength": 48 },
+          "source": { "type": "string", "enum": ["manual", "mdns", "mqtt"] },
+          "base_url": { "type": "string", "maxLength": 128 },
+          "path": { "type": "string", "maxLength": 64 },
+          "auth": { "type": "string", "enum": ["none", "bearer", "query"] },
+          "token": { "type": ["string", "null"], "maxLength": 128 },
+          "platform": { "type": "string", "enum": ["linux", "windows", "macos", "freebsd", "other"] },
+          "enabled": { "type": "boolean" },
+          "order": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "hidden": { "type": "boolean" },
+          "carousel": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

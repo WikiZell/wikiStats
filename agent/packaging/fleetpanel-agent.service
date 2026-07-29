@@ -1,0 +1,73 @@
+[Unit]
+Description=FleetPanel / WikiStats telemetry agent
+Documentation=https://github.com/fleetpanel/wikistats
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=fleetpanel
+Group=fleetpanel
+ExecStart=/opt/fleetpanel-agent/venv/bin/fleetpanel-agent --config /etc/fleetpanel-agent/config.toml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+# Unbuffered output so journalctl -f is live.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# ---------------------------------------------------------------- hardening
+# The agent only reads /proc, /sys and filesystem usage, and binds one TCP port.
+# It never writes to the host, so almost everything can be locked down. The
+# exceptions below are load-bearing - removing the comment is how the next
+# person avoids breaking temperature or disk collection.
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=default
+# ProtectProc=invisible would hide other users' processes and break process_count.
+
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+# AF_NETLINK is required by psutil for network interface enumeration.
+
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Ports above 1024 need no capability. Do not lower the port below 1024.
+
+# Read-only access to the parts of the host the collectors need.
+ReadWritePaths=
+ReadOnlyPaths=/proc /sys /etc/fleetpanel-agent /opt/fleetpanel-agent
+
+# vcgencmd needs /dev/vchiq or /dev/vcio on a Raspberry Pi. PrivateDevices=yes
+# hides them, so the SoC temperature falls back to /sys/class/thermal, which
+# reports the same value. If you specifically need vcgencmd, add:
+#   PrivateDevices=no
+#   DeviceAllow=/dev/vcio rw
+#   SupplementaryGroups=video
+
+# Bounded resources: a runaway agent must not take the machine with it.
+MemoryMax=256M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,103 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fleetpanel-agent"
+version = "0.1.0"
+description = "FleetPanel / WikiStats telemetry agent - serves fleetpanel.telemetry.v1 over HTTP and MQTT"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "FleetPanel contributors" }]
+keywords = ["telemetry", "monitoring", "esp32", "raspberry-pi", "mqtt"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Monitoring",
+]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "psutil>=6.0",
+    "pydantic>=2.8",
+    "zeroconf>=0.132",
+    "paho-mqtt>=2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-timeout>=2.3",
+    "httpx>=0.27",
+    "jsonschema>=4.23",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-psutil",
+]
+
+[project.scripts]
+fleetpanel-agent = "fleetpanel_agent.__main__:main"
+fleetpanel-simulator = "fleetpanel_agent.simulator:main"
+
+[project.urls]
+Homepage = "https://github.com/fleetpanel/wikistats"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+fleetpanel_agent = ["schemas/*.json", "py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+# No test in this suite legitimately runs for a minute. A hang is a bug, and a
+# hung CI job is far more expensive to diagnose than a failed one.
+timeout = 60
+filterwarnings = ["error::DeprecationWarning:fleetpanel_agent.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF", "ARG", "PTH", "BLE", "S"]
+ignore = [
+    # Collector code reads plain paths from /proc and /sys; str paths are fine there.
+    "PTH123",
+]
+# BLE001 and S603 stay enabled: every broad `except Exception` and every
+# `subprocess` call must carry an explicit `# noqa: <rule> - <reason>` so the
+# failure policy and the argv-is-constant guarantee are visible at each site.
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "ARG001", "ARG002", "ARG005",  # stub signatures must match the real ones
+    "N802",
+    "S101",                        # asserts are the point
+    "S105", "S106", "S108",        # fake tokens and /proc-style literal paths
+    "SLF001",                      # tests may inspect private state
+    "RUF005", "RUF034", "RUF043",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+ignore_missing_imports = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["zeroconf.*", "paho.*"]
+ignore_missing_imports = true

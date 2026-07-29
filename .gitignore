@@ -1,0 +1,46 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- PlatformIO ----
+.pio/
+.pioenvs/
+.piolibdeps/
+firmware/.pio/
+
+# ---- Node / web ----
+node_modules/
+web/dist/
+web/.vite/
+
+# Generated LittleFS payload. Built from web/ with `npm run build`; committing it
+# would mean two sources of truth for the same bytes.
+firmware/data/www/
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---- Secrets: never commit ----
+# Real deployment configs may contain API tokens, Wi-Fi and MQTT passwords.
+config.toml
+!agent/packaging/config.example.toml
+secrets.ini
+*.pem
+*.key
+!shared/*.json
+backup-*.json

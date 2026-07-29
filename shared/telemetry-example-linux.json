@@ -1,0 +1,95 @@
+{
+  "schema": "fleetpanel.telemetry.v1",
+  "timestamp": "2026-07-28T20:45:30Z",
+  "sequence": 1234,
+  "device": {
+    "id": "f6a3f749c2dd",
+    "name": "WikiHermes",
+    "hostname": "wikihermes",
+    "platform": "linux",
+    "os_name": "Debian GNU/Linux 12",
+    "os_version": "12",
+    "kernel": "6.6.31+rpt-rpi-v8",
+    "architecture": "aarch64",
+    "hardware_model": "Raspberry Pi 4 Model B Rev 1.5",
+    "agent_version": "0.1.0"
+  },
+  "status": {
+    "state": "online",
+    "uptime_seconds": 348122,
+    "boot_time": "2026-07-24T20:03:28Z",
+    "process_count": 143,
+    "logged_in_users": 1
+  },
+  "cpu": {
+    "usage_percent": 17.4,
+    "per_core_percent": [14.0, 22.1, 13.6, 19.8],
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "frequency_mhz": 1800.0,
+    "load_1": 0.41,
+    "load_5": 0.3,
+    "load_15": 0.27,
+    "temperature_c": 48.2,
+    "temperatures": [
+      {
+        "label": "cpu",
+        "temperature_c": 48.2,
+        "high_c": 80.0,
+        "critical_c": 90.0
+      }
+    ]
+  },
+  "memory": {
+    "total_bytes": 8589934592,
+    "available_bytes": 5368709120,
+    "used_bytes": 3221225472,
+    "free_bytes": 4294967296,
+    "usage_percent": 37.5,
+    "swap_total_bytes": 1073741824,
+    "swap_used_bytes": 134217728,
+    "swap_free_bytes": 939524096,
+    "swap_usage_percent": 12.5
+  },
+  "storage": {
+    "total_bytes": 62538170368,
+    "used_bytes": 27692531712,
+    "free_bytes": 34845638656,
+    "usage_percent": 44.3,
+    "mounts": [
+      {
+        "device": "/dev/mmcblk0p2",
+        "mountpoint": "/",
+        "filesystem": "ext4",
+        "total_bytes": 62538170368,
+        "used_bytes": 27692531712,
+        "free_bytes": 34845638656,
+        "usage_percent": 44.3
+      }
+    ]
+  },
+  "network": {
+    "primary_interface": "eth0",
+    "ip_addresses": ["192.168.1.50"],
+    "rx_bytes_total": 28478212231,
+    "tx_bytes_total": 9876241132,
+    "rx_bytes_per_second": 24563.2,
+    "tx_bytes_per_second": 4311.7
+  },
+  "optional": {
+    "gpu": null,
+    "battery": null
+  },
+  "capabilities": [
+    "cpu",
+    "cpu_temperature",
+    "cpu_frequency",
+    "load_average",
+    "memory",
+    "swap",
+    "storage",
+    "network",
+    "processes",
+    "sessions"
+  ]
+}

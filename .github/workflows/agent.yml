@@ -1,0 +1,143 @@
+name: Agent
+
+on:
+  push:
+    paths: ["agent/**", "shared/**", ".github/workflows/agent.yml"]
+  pull_request:
+    paths: ["agent/**", "shared/**", ".github/workflows/agent.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: agent
+
+jobs:
+  lint:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+        continue-on-error: true # formatting is advisory; lint failures are not
+
+  typecheck:
+    name: mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: mypy src
+
+  test:
+    name: pytest (${{ matrix.python }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is in the matrix on purpose: the collectors have to degrade
+        # gracefully on a platform with no /proc, and the tests must not depend on
+        # the host they run on.
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+        exclude:
+          - os: windows-latest
+            python: "3.11"
+          - os: windows-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  schema:
+    name: JSON Schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install jsonschema
+      - name: Validate the schemas and the documented example
+        working-directory: .
+        run: |
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          from jsonschema import validators
+
+          shared = Path("shared")
+          failures = []
+
+          for name in ("telemetry-v1.schema.json", "configuration-v1.schema.json"):
+              schema = json.loads((shared / name).read_text())
+              validators.validator_for(schema).check_schema(schema)
+              print(f"{name}: schema is valid")
+
+          telemetry = json.loads((shared / "telemetry-v1.schema.json").read_text())
+          validator = validators.validator_for(telemetry)(telemetry)
+          example = json.loads((shared / "telemetry-example-linux.json").read_text())
+          errors = sorted(validator.iter_errors(example), key=lambda e: e.path)
+          if errors:
+              failures.extend(f"example: {e.message}" for e in errors)
+          else:
+              print("telemetry-example-linux.json: valid")
+
+          packaged = Path("agent/src/fleetpanel_agent/schemas/telemetry-v1.schema.json")
+          if packaged.read_text() != (shared / "telemetry-v1.schema.json").read_text():
+              failures.append(
+                  "agent/src/fleetpanel_agent/schemas/telemetry-v1.schema.json has drifted "
+                  "from shared/telemetry-v1.schema.json"
+              )
+          else:
+              print("packaged schema copy: identical")
+
+          if failures:
+              print("\n".join(failures), file=sys.stderr)
+              sys.exit(1)
+          PY
+
+  simulator:
+    name: Simulator smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Serve three fake devices and validate what they emit
+        run: |
+          python -m fleetpanel_agent.simulator --devices 3 --port-start 8800 \
+            --host 127.0.0.1 --no-mdns --log-level WARNING &
+          SIM=$!
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8800/api/v1/health >/dev/null && break
+            sleep 1
+          done
+          python - <<'PY'
+          import json, urllib.request
+          from jsonschema import validate
+          schema = json.load(open("src/fleetpanel_agent/schemas/telemetry-v1.schema.json"))
+          for port in (8800, 8801, 8802):
+              with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/v1/telemetry") as r:
+                  document = json.load(r)
+              validate(document, schema)
+              print(f"port {port}: {document['device']['name']} valid")
+          PY
+          kill $SIM

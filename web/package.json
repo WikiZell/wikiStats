@@ -1,0 +1,18 @@
+{
+  "name": "wikistats-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Configuration website for the WikiStats / FleetPanel ESP32 panel. No runtime dependencies and no CDN requests: the whole bundle is served from the panel's LittleFS partition and must work with no internet access.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node scripts/build-fs.mjs",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "vite": "5.4.10"
+  }
+}
